@@ -22,11 +22,10 @@ from typing import (
     overload,
 )
 
-from triton.debugging import AOT_KERNEL_DIR, logger
-
 from .._C.libtriton.triton import TMAInfos
 from ..common.backend import get_backend, get_cuda_version_key
 from .interpreter import InterpretedFunction
+from triton.debugging import AOT_KERNEL_DIR, logger
 
 
 def get_cuda_stream(idx=None):
@@ -600,8 +599,9 @@ class JITFunction(KernelInterface[T]):
                 configs,
             ):
                 return None
-            from dataclasses import dataclass
             from typing import Any, Dict
+
+            from dataclasses import dataclass
 
             @dataclass
             class CompileArgs(dict):
@@ -768,10 +768,33 @@ class JITFunction(KernelInterface[T]):
                 out_name = Path(self.__name__).with_suffix(
                     f".{sig_hash}_{suffix}.{ext}"
                 )
-                with (AOT_KERNEL_DIR / out_name).open("w") as fp:
+                out_dir = AOT_KERNEL_DIR / self.__name__
+                out_dir.mkdir(parents=True, exist_ok=True)
+
+                with (out_dir / out_name).open("w") as fp:
                     fp.write(Path(template_path).read_text().format(**params))
 
-        create_AOT_artifacts()
+            return out_dir
+
+        def link_aot_artifacts(kernel_path):
+            import glob
+            import subprocess
+            import sys
+
+            import triton
+
+            linker_path = os.path.join(triton.tools.__path__[0], "link.py")
+
+            # link all desired configs
+            h_files = glob.glob(os.path.join(kernel_path, "*.h"))
+            subprocess.run(
+                [sys.executable, linker_path] + h_files + ["-o", self.__name__],
+                check=True,
+                cwd=kernel_path,
+            )
+
+        kernel_path = create_AOT_artifacts()
+        link_aot_artifacts(kernel_path)
 
         return bin
 
@@ -1010,6 +1033,7 @@ def reinterpret(tensor, dtype):
         # A new wrapper is needed around an unwrapped tensor.
         return TensorWrapper(tensor, dtype)
     else:
+        raise TypeError(f"Cannot reinterpret a {type(tensor)}.")
         raise TypeError(f"Cannot reinterpret a {type(tensor)}.")
         raise TypeError(f"Cannot reinterpret a {type(tensor)}.")
         raise TypeError(f"Cannot reinterpret a {type(tensor)}.")
