@@ -6,7 +6,9 @@ from pathlib import Path
 
 from loguru import logger
 
-LOG_DIR = Path(os.environ.get("TRITON_LOG_DIR", "~/.triton/logs")).absolute()
+LOG_DIR = Path(
+    os.environ.get("TRITON_LOG_DIR", os.path.expanduser("~/.triton/logs"))
+).absolute()
 LOG_PATH = LOG_DIR / "debug.log"
 AOT_KERNEL_DIR = Path(
     os.environ.get("TRITON_AOT_KERNEL_DIR", "~/.triton/aot")

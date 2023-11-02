@@ -321,6 +321,22 @@ def check_dir(dir):
     return dir
 
 
+def test_aot_jit_add():
+    # Set up test
+    N = 1024
+    BLOCK_SIZE = 1024
+    NUM_WARPS = 4
+    test_dir = Path("aot_test_kernels").absolute()
+    check_dir(test_dir)
+    test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
+
+    from triton.runtime.jit import JITFunction
+
+    fn = JITFunction(test_kernel)
+    # Run aot jit
+    # Run test
+
+
 def test_compile_link_add():
     from pathlib import Path
 
