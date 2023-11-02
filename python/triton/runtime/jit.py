@@ -768,7 +768,7 @@ class JITFunction(KernelInterface[T]):
                 out_name = Path(self.__name__).with_suffix(
                     f".{sig_hash}_{suffix}.{ext}"
                 )
-                out_dir = AOT_KERNEL_DIR / self.__name__
+                out_dir = AOT_KERNEL_DIR / out_name
                 out_dir.mkdir(parents=True, exist_ok=True)
 
                 with (out_dir / out_name).open("w") as fp:
