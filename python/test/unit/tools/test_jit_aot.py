@@ -302,16 +302,43 @@ def generate_test_data(dir, shape, file_name, dtype=np.float32, seed=0, ext="csv
     return x, x_path
 
 
-def generate_dummy_data(dir, shape, file_name, dtype=np.float16, seed=0, ext="csv"):
-    x = np.ones(np.prod(shape)).astype(dtype).reshape(shape)
+from enum import StrEnum
+
+
+class DataGeneratorType(StrEnum):
+    NUMPY = "numpy"
+    TORCH = "torch"
+
+
+def generate_dummy_data(
+    dir,
+    shape,
+    file_name,
+    dtype,
+    generator_type=DataGeneratorType.TORCH,
+    gen_fn="ones",
+    ext="csv",
+):
+    generator_ty = torch if generator_type == DataGeneratorType.TORCH else np
+    assert isinstance(dtype, generator_ty.dtype)
+    assert hasattr(generator_ty, gen_fn)
+
+    generator = getattr(generator_ty, gen_fn)
+
+    x = generator(shape, dtype=dtype)
     x_path = os.path.join(dir, f"{file_name}.{ext}")
-    if dtype == np.float16:
-        write_dtype = np.int16
-    elif dtype == np.float32:
-        write_dtype = np.int32
+    if dtype == generator_ty.float16:
+        write_dtype = generator_ty.int16
+    elif dtype == generator_ty.float32:
+        write_dtype = generator_ty.int32
     else:
         write_dtype = dtype
-    x.view(write_dtype).ravel().tofile(x_path, sep=",")
+
+    out_arr = x.view(write_dtype).reshape(-1)
+    if DataGeneratorType.TORCH:
+        out_arr = out_arr.cpu().numpy()
+    out_arr.tofile(x_path, sep=",")
+
     return x, x_path
 
 
@@ -401,6 +428,38 @@ def test_aot_jit_add():
         kernel_path, N, kernel_name, dtype_in, dtype_out, exe=executable_name
     )
     assert os.path.exists(os.path.join(kernel_path, f"{executable_name}"))
+
+    data_dir = Path("test_data").absolute()
+    check_dir(data_dir)
+
+    x, x_path = generate_dummy_data(
+        data_dir,
+        shape=(N,),
+        generator_type=DataGeneratorType.TORCH,
+        file_name="x",
+        dtype=dtype,
+    )
+    y, y_path = generate_dummy_data(
+        data_dir,
+        shape=(N,),
+        generator_type=DataGeneratorType.TORCH,
+        file_name="y",
+        dtype=dtype,
+    )
+    out_path = os.path.join(data_dir, "out.csv")
+
+    # run test case
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = kernel_path
+
+    subprocess.run(
+        [f"./{executable_name}", x_path, y_path, out_path],
+        env=env,
+        check=True,
+        cwd=kernel_path,
+    )
+    assert os.path.exists(out_path)
+
     shutil.rmtree(test_dir)
 
     # # Generate test data
@@ -450,98 +509,98 @@ def test_aot_jit_add():
     # # output_triton = test_fn(x, y)
 
 
-def _test_compile_link_add():
-    from pathlib import Path
+# def _test_compile_link_add():
+#     from pathlib import Path
 
-    N = 1024
-    BLOCK_SIZE = 1024
-    NUM_WARPS = 4
-    kernel_dir = Path("aot_test_kernels").absolute()
-    check_dir(kernel_dir)
-    dtype = np.float32
+#     N = 1024
+#     BLOCK_SIZE = 1024
+#     NUM_WARPS = 4
+#     kernel_dir = Path("aot_test_kernels").absolute()
+#     check_dir(kernel_dir)
+#     dtype = np.float32
 
-    kernel_path = write_tt_kernel(kernel_dir, add_kernel_src, "add_kernel.py")
-    kernel_name = _find_kernel_name(kernel_path)
-    compile_kernel_add(
-        kernel_dir,
-        kernel_path,
-        N,
-        name=kernel_name,
-        dtype=dtype,
-        BLOCK_SIZE=BLOCK_SIZE,
-        num_warps=NUM_WARPS,
-    )
-    link_aot_kernels(kernel_dir, out_name=kernel_name)
+#     kernel_path = write_tt_kernel(kernel_dir, add_kernel_src, "add_kernel.py")
+#     kernel_name = _find_kernel_name(kernel_path)
+#     compile_kernel_add(
+#         kernel_dir,
+#         kernel_path,
+#         N,
+#         name=kernel_name,
+#         dtype=dtype,
+#         BLOCK_SIZE=BLOCK_SIZE,
+#         num_warps=NUM_WARPS,
+#     )
+#     link_aot_kernels(kernel_dir, out_name=kernel_name)
 
-    type_converter = {
-        "i1": "int32_t",
-        "i8": "int8_t",
-        "i16": "int16_t",
-        "i32": "int32_t",
-        "i64": "int64_t",
-        "u32": "uint32_t",
-        "u64": "uint64_t",
-        "fp16": "int16_t",
-        "bf16": "int16_t",
-        "fp32": "int32_t",
-        "f32": "int16_t",
-        "fp64": "int64_t",
-    }
+#     type_converter = {
+#         "i1": "int32_t",
+#         "i8": "int8_t",
+#         "i16": "int16_t",
+#         "i32": "int32_t",
+#         "i64": "int64_t",
+#         "u32": "uint32_t",
+#         "u64": "uint64_t",
+#         "fp16": "int16_t",
+#         "bf16": "int16_t",
+#         "fp32": "int32_t",
+#         "f32": "int16_t",
+#         "fp64": "int64_t",
+#     }
 
-    dtype_in = dtype_out = type_converter[(_dtype_map(dtype))]
-    print("dtype_in: ", dtype_in)
+#     dtype_in = dtype_out = type_converter[(_dtype_map(dtype))]
+#     print("dtype_in: ", dtype_in)
 
-    executable_name = "test"
-    gen_kernel_library(kernel_dir, f"lib{kernel_name}.so")
-    gen_add_test_bin(
-        kernel_dir,
-        N,
-        dtype_in=dtype_in,
-        dtype_out=dtype_out,
-        kernel_name=kernel_name,
-        exe=executable_name,
-    )
+#     executable_name = "test"
+#     gen_kernel_library(kernel_dir, f"lib{kernel_name}.so")
+#     gen_add_test_bin(
+#         kernel_dir,
+#         N,
+#         dtype_in=dtype_in,
+#         dtype_out=dtype_out,
+#         kernel_name=kernel_name,
+#         exe=executable_name,
+#     )
 
-    # Generate test data
-    seed = 0
-    data_dir = Path("test_data").absolute()
-    check_dir(data_dir)
+#     # Generate test data
+#     seed = 0
+#     data_dir = Path("test_data").absolute()
+#     check_dir(data_dir)
 
-    data_generator = generate_dummy_data
-    x, x_path = data_generator(data_dir, (N,), file_name="x", seed=seed, dtype=dtype)
-    y, y_path = data_generator(data_dir, (N,), file_name="y", seed=seed, dtype=dtype)
-    out_path = os.path.join(data_dir, "out.csv")
-    expected = x + y
-    # print(f"EXPECTED: {expected}")
+#     data_generator = generate_dummy_data
+#     x, x_path = data_generator(data_dir, (N,), file_name="x", seed=seed, dtype=dtype)
+#     y, y_path = data_generator(data_dir, (N,), file_name="y", seed=seed, dtype=dtype)
+#     out_path = os.path.join(data_dir, "out.csv")
+#     expected = x + y
+#     # print(f"EXPECTED: {expected}")
 
-    # run test case
-    env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = kernel_dir
+#     # run test case
+#     env = os.environ.copy()
+#     env["LD_LIBRARY_PATH"] = kernel_dir
 
-    subprocess.run(
-        [f"./{executable_name}", x_path, y_path, out_path],
-        env=env,
-        check=True,
-        cwd=kernel_dir,
-    )
+#     subprocess.run(
+#         [f"./{executable_name}", x_path, y_path, out_path],
+#         env=env,
+#         check=True,
+#         cwd=kernel_dir,
+#     )
 
-    # read data and compare against reference
-    if dtype == np.float16:
-        conversion_type = np.int16
-    elif dtype == np.float32:
-        conversion_type = np.int32
-    else:
-        conversion_type = dtype
+#     # read data and compare against reference
+#     if dtype == np.float16:
+#         conversion_type = np.int16
+#     elif dtype == np.float32:
+#         conversion_type = np.int32
+#     else:
+#         conversion_type = dtype
 
-    actual = np.genfromtxt(out_path, delimiter=",", dtype=conversion_type)
-    actual = actual.reshape((N,)).view(dtype)
-    EXPECTED_VAL = 2.0
+#     actual = np.genfromtxt(out_path, delimiter=",", dtype=conversion_type)
+#     actual = actual.reshape((N,)).view(dtype)
+#     EXPECTED_VAL = 2.0
 
-    def compute_stats(x):
-        actual_counts = np.isclose(x, EXPECTED_VAL).sum()
-        return actual_counts
+#     def compute_stats(x):
+#         actual_counts = np.isclose(x, EXPECTED_VAL).sum()
+#         return actual_counts
 
-    print(f"ACTUAL counts: {compute_stats(actual)}")
-    print(f"Actual: {actual[:10]} {actual[-10:]}")
-    # c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
-    # np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=1e-4, rtol=0.0)
+#     print(f"ACTUAL counts: {compute_stats(actual)}")
+#     print(f"Actual: {actual[:10]} {actual[-10:]}")
+#     # c_ref = np.matmul(a.astype(np.float32), b.astype(np.float32))
+#     # np.testing.assert_allclose(c_tri, c_ref * c_ref, atol=1e-4, rtol=0.0)
