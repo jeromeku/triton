@@ -12,6 +12,7 @@ from pytest import MonkeyPatch
 
 import triton
 from triton.common import cuda_include_dir, libcuda_dirs
+from triton.runtime.jit import JITFunction
 
 add_kernel_src = """
 import triton
@@ -324,6 +325,32 @@ def check_dir(dir):
     return dir
 
 
+# Converts TT type to C-compatible type
+# strictly for passing numpy / torch types to C
+_TT_TO_C = {
+    "i1": "int32_t",
+    "i8": "int8_t",
+    "i16": "int16_t",
+    "i32": "int32_t",
+    "i64": "int64_t",
+    "u32": "uint32_t",
+    "u64": "uint64_t",
+    "fp16": "int16_t",
+    "bf16": "int16_t",
+    "fp32": "int32_t",
+    "f32": "int16_t",
+    "fp64": "int64_t",
+}
+
+
+def ty_to_TT(arg):
+    return JITFunction._type_of(JITFunction._key_of(arg))
+
+
+def TT_to_C(ty_str):
+    return _TT_TO_C[ty_str.replace("*", "")]
+
+
 def test_aot_jit_add():
     # Set up test
 
@@ -360,11 +387,67 @@ def test_aot_jit_add():
             compile_so=True,
         )
 
-        # Run test
-        # output_torch = x + y
-        # output_triton = test_fn(x, y)
+        tt_type = ty_to_TT(x)
+        dtype_in = dtype_out = TT_to_C(tt_type)
 
+        print("dtype_in: ", dtype_in)
     shutil.rmtree(test_dir)
+    # executable_name = "test"
+    # gen_kernel_library(kernel_dir, f"lib{kernel_name}.so")
+    # gen_add_test_bin(
+    #     kernel_dir,
+    #     N,
+    #     dtype_in=dtype_in,
+    #     dtype_out=dtype_out,
+    #     kernel_name=kernel_name,
+    #     exe=executable_name,
+    # )
+
+    # # Generate test data
+    # seed = 0
+    # data_dir = Path("test_data").absolute()
+    # check_dir(data_dir)
+
+    # data_generator = generate_dummy_data
+    # x, x_path = data_generator(data_dir, (N,), file_name="x", seed=seed, dtype=dtype)
+    # y, y_path = data_generator(data_dir, (N,), file_name="y", seed=seed, dtype=dtype)
+    # out_path = os.path.join(data_dir, "out.csv")
+    # expected = x + y
+    # # print(f"EXPECTED: {expected}")
+
+    # # run test case
+    # env = os.environ.copy()
+    # env["LD_LIBRARY_PATH"] = kernel_dir
+
+    # subprocess.run(
+    #     [f"./{executable_name}", x_path, y_path, out_path],
+    #     env=env,
+    #     check=True,
+    #     cwd=kernel_dir,
+    # )
+
+    # # read data and compare against reference
+    # if dtype == np.float16:
+    #     conversion_type = np.int16
+    # elif dtype == np.float32:
+    #     conversion_type = np.int32
+    # else:
+    #     conversion_type = dtype
+
+    # actual = np.genfromtxt(out_path, delimiter=",", dtype=conversion_type)
+    # actual = actual.reshape((N,)).view(dtype)
+    # EXPECTED_VAL = 2.0
+
+    # def compute_stats(x):
+    #     actual_counts = np.isclose(x, EXPECTED_VAL).sum()
+    #     return actual_counts
+
+    # print(f"ACTUAL counts: {compute_stats(actual)}")
+    # print(f"Actual: {actual[:10]} {actual[-10:]}")
+
+    # # Run test
+    # # output_torch = x + y
+    # # output_triton = test_fn(x, y)
 
 
 def _test_compile_link_add():
