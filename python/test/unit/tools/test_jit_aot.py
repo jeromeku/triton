@@ -378,7 +378,11 @@ def TT_to_C(ty_str):
     return _TT_TO_C[ty_str.replace("*", "")]
 
 
-@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
+@pytest.mark.parametrize(
+    "dtype",
+    [torch.float16, torch.float32, torch.int16, torch.int32],
+    ids=lambda x: str(x),
+)
 def test_aot_jit_add(dtype):
     # Set up test
 
@@ -463,16 +467,16 @@ def test_aot_jit_add(dtype):
 
     shutil.rmtree(test_dir)
 
+    def _normalized_dtype(ty) -> np.dtype:
+        return getattr(np, str(dtype).split(".")[-1])
+
     # read data and compare against reference
     if "float16" in str(dtype):
         conversion_type = np.int16
     elif "float32" in str(dtype):
         conversion_type = np.int32
     else:
-        conversion_type = dtype
-
-    def _normalized_dtype(ty):
-        return getattr(np, str(dtype).split(".")[-1])
+        conversion_type = _normalized_dtype(dtype)
 
     expected = x + y
     actual = np.genfromtxt(out_path, delimiter=",", dtype=conversion_type)
