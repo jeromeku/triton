@@ -25,7 +25,8 @@ from typing import (
 from .._C.libtriton.triton import TMAInfos
 from ..common.backend import get_backend, get_cuda_version_key
 from .interpreter import InterpretedFunction
-from triton.debugging import AOT_KERNEL_DIR, logger
+from triton.debugging import logger
+from triton.debugging.debugging import TRITON_AOT_KERNEL_DIR
 
 
 def get_cuda_stream(idx=None):
@@ -761,6 +762,11 @@ class JITFunction(KernelInterface[T]):
                 "_placeholder": "",
             }
             logger.bind(PARAMS=params).debug("AOT PARAMS")
+
+            kernel_dir = os.environ.get("TRITON_AOT_KERNEL_DIR", TRITON_AOT_KERNEL_DIR)
+            out_dir = Path(kernel_dir) / self.__name__
+            out_dir.mkdir(parents=True, exist_ok=True)
+
             for ext in ["h", "c"]:
                 template_path = (
                     Path(__file__).parent.parent / "tools" / f"compile.{ext}"
@@ -768,8 +774,6 @@ class JITFunction(KernelInterface[T]):
                 out_name = Path(self.__name__).with_suffix(
                     f".{sig_hash}_{suffix}.{ext}"
                 )
-                out_dir = AOT_KERNEL_DIR / out_name
-                out_dir.mkdir(parents=True, exist_ok=True)
 
                 with (out_dir / out_name).open("w") as fp:
                     fp.write(Path(template_path).read_text().format(**params))

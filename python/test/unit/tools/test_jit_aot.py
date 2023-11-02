@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+from pytest import MonkeyPatch
 
 import triton
 from triton.common import cuda_include_dir, libcuda_dirs
@@ -323,6 +324,8 @@ def check_dir(dir):
 
 def test_aot_jit_add():
     # Set up test
+    import shutil
+
     import torch
 
     # Test params
@@ -335,22 +338,26 @@ def test_aot_jit_add():
     # Set up aot kernel directory
     test_dir = Path("aot_test_kernels").absolute()
     check_dir(test_dir)
-    os.environ["AOT_TRITON_KERNEL_DIR"] = str(test_dir)
 
-    from triton.runtime.jit import JITFunction
+    with MonkeyPatch.context() as mp:
+        mp.setenv("TRITON_AOT_KERNEL_DIR", str(test_dir))
+        print("TRITON_AOT_KERNEL_DIR: ", os.environ["TRITON_AOT_KERNEL_DIR"])
+        from triton.runtime.jit import JITFunction
 
-    test_fn = JITFunction(test_kernel)
+        test_fn = JITFunction(test_kernel)
+        x = torch.ones(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
+        y = torch.ones(N, dtype=dtype, device="cuda")
+        output = torch.empty_like(x)
+        grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
 
-    x = torch.ones(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
-    y = torch.ones(N, dtype=dtype, device="cuda")
-    output = torch.empty_like(x)
-    grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
+        # Run aot jit
+        test_fn[grid](x, y, output, N, BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS)
 
-    # Run aot jit
-    test_fn[grid](x, y, output, N, BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS)
-    # Run test
-    # output_torch = x + y
-    # output_triton = test_fn(x, y)
+        # Run test
+        # output_torch = x + y
+        # output_triton = test_fn(x, y)
+
+    shutil.rmtree(test_dir)
 
 
 def test_compile_link_add():

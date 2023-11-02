@@ -10,12 +10,12 @@ LOG_DIR = Path(
     os.environ.get("TRITON_LOG_DIR", os.path.expanduser("~/.triton/logs"))
 ).absolute()
 LOG_PATH = LOG_DIR / "debug.log"
-AOT_KERNEL_DIR = Path(
-    os.environ.get("TRITON_AOT_KERNEL_DIR", "~/.triton/aot")
+TRITON_AOT_KERNEL_DIR = Path(
+    os.environ.get("TRITON_AOT_KERNEL_DIR", os.path.expanduser("~/.triton/aot"))
 ).absolute()
 
-if not AOT_KERNEL_DIR.exists():
-    AOT_KERNEL_DIR.mkdir(parents=True, exist_ok=True)
+if not TRITON_AOT_KERNEL_DIR.exists():
+    TRITON_AOT_KERNEL_DIR.mkdir(parents=True, exist_ok=True)
 
 if not LOG_DIR.exists():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
