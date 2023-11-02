@@ -378,14 +378,15 @@ def TT_to_C(ty_str):
     return _TT_TO_C[ty_str.replace("*", "")]
 
 
-def test_aot_jit_add():
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
+def test_aot_jit_add(dtype):
     # Set up test
 
     # Test params
     N = 1024
     BLOCK_SIZE = 1024
     NUM_WARPS = 4
-    dtype = torch.float32
+
     test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
 
     # Set up aot kernel directory
