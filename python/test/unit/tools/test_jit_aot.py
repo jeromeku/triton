@@ -397,17 +397,11 @@ def test_aot_jit_add():
     kernel_name = test_fn.__name__
 
     gen_kernel_library(kernel_path, f"lib{kernel_name}.so")
-    assert os.path.exists(os.path.join(kernel_path, f"lib{kernel_name}.so"))
+    gen_add_test_bin(
+        kernel_path, N, kernel_name, dtype_in, dtype_out, exe=executable_name
+    )
+    assert os.path.exists(os.path.join(kernel_path, f"{executable_name}"))
     shutil.rmtree(test_dir)
-
-    # gen_add_test_bin(
-    #     test_dir
-    #     N,
-    #     dtype_in=dtype_in,
-    #     dtype_out=dtype_out,
-    #     kernel_name=kernel_name,
-    #     exe=executable_name,
-    # )
 
     # # Generate test data
     # seed = 0
