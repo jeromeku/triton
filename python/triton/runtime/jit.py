@@ -827,9 +827,11 @@ class JITFunction(KernelInterface[T]):
                 # extract function object
 
             fn = getattr(temp_module, fn_name)
+
+            # Unwrap function in case user has passed a JITFunction
             if isinstance(fn, JITFunction):
-                self = fn
-                return
+                # Unwrap function
+                fn = fn.fn
 
         self.fn = fn
         self.src = textwrap.dedent(inspect.getsource(fn))

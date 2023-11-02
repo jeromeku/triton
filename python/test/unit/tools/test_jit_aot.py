@@ -323,18 +323,34 @@ def check_dir(dir):
 
 def test_aot_jit_add():
     # Set up test
+    import torch
+
+    # Test params
     N = 1024
     BLOCK_SIZE = 1024
     NUM_WARPS = 4
+    dtype = torch.float32
+    test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
+
+    # Set up aot kernel directory
     test_dir = Path("aot_test_kernels").absolute()
     check_dir(test_dir)
-    test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
+    os.environ["AOT_TRITON_KERNEL_DIR"] = str(test_dir)
 
     from triton.runtime.jit import JITFunction
 
-    fn = JITFunction(test_kernel)
+    test_fn = JITFunction(test_kernel)
+
+    x = torch.ones(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
+    y = torch.ones(N, dtype=dtype, device="cuda")
+    output = torch.empty_like(x)
+    grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
+
     # Run aot jit
+    test_fn[grid](x, y, output, N, BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS)
     # Run test
+    # output_torch = x + y
+    # output_triton = test_fn(x, y)
 
 
 def test_compile_link_add():
