@@ -387,15 +387,21 @@ def test_aot_jit_add():
             compile_so=True,
         )
 
-        tt_type = ty_to_TT(x)
-        dtype_in = dtype_out = TT_to_C(tt_type)
+    tt_type = ty_to_TT(x)
+    dtype_in = dtype_out = TT_to_C(tt_type)
 
-        print("dtype_in: ", dtype_in)
+    print("dtype_in: ", dtype_in)
+
+    executable_name = "test"
+    # TODO: Add way to manually set kernel path
+    kernel_name = test_fn.__name__
+
+    gen_kernel_library(kernel_path, f"lib{kernel_name}.so")
+    assert os.path.exists(os.path.join(kernel_path, f"lib{kernel_name}.so"))
     shutil.rmtree(test_dir)
-    # executable_name = "test"
-    # gen_kernel_library(kernel_dir, f"lib{kernel_name}.so")
+
     # gen_add_test_bin(
-    #     kernel_dir,
+    #     test_dir
     #     N,
     #     dtype_in=dtype_in,
     #     dtype_out=dtype_out,
