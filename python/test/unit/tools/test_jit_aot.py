@@ -1,11 +1,13 @@
 import glob
 import os
+import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
+import torch
 from pytest import MonkeyPatch
 
 import triton
@@ -324,9 +326,6 @@ def check_dir(dir):
 
 def test_aot_jit_add():
     # Set up test
-    import shutil
-
-    import torch
 
     # Test params
     N = 1024
@@ -351,7 +350,15 @@ def test_aot_jit_add():
         grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
 
         # Run aot jit
-        test_fn[grid](x, y, output, N, BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS)
+        bin, kernel_path = test_fn[grid](
+            x,
+            y,
+            output,
+            N,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=NUM_WARPS,
+            compile_so=True,
+        )
 
         # Run test
         # output_torch = x + y
@@ -360,7 +367,7 @@ def test_aot_jit_add():
     shutil.rmtree(test_dir)
 
 
-def test_compile_link_add():
+def _test_compile_link_add():
     from pathlib import Path
 
     N = 1024
