@@ -462,40 +462,21 @@ def test_aot_jit_add():
 
     shutil.rmtree(test_dir)
 
-    # # Generate test data
-    # seed = 0
-    # data_dir = Path("test_data").absolute()
-    # check_dir(data_dir)
+    # read data and compare against reference
+    if "float16" in str(dtype):
+        conversion_type = np.int16
+    elif "float32" in str(dtype):
+        conversion_type = np.int32
+    else:
+        conversion_type = dtype
 
-    # data_generator = generate_dummy_data
-    # x, x_path = data_generator(data_dir, (N,), file_name="x", seed=seed, dtype=dtype)
-    # y, y_path = data_generator(data_dir, (N,), file_name="y", seed=seed, dtype=dtype)
-    # out_path = os.path.join(data_dir, "out.csv")
-    # expected = x + y
-    # # print(f"EXPECTED: {expected}")
+    def _normalized_dtype(ty):
+        return getattr(np, str(dtype).split(".")[-1])
 
-    # # run test case
-    # env = os.environ.copy()
-    # env["LD_LIBRARY_PATH"] = kernel_dir
-
-    # subprocess.run(
-    #     [f"./{executable_name}", x_path, y_path, out_path],
-    #     env=env,
-    #     check=True,
-    #     cwd=kernel_dir,
-    # )
-
-    # # read data and compare against reference
-    # if dtype == np.float16:
-    #     conversion_type = np.int16
-    # elif dtype == np.float32:
-    #     conversion_type = np.int32
-    # else:
-    #     conversion_type = dtype
-
-    # actual = np.genfromtxt(out_path, delimiter=",", dtype=conversion_type)
-    # actual = actual.reshape((N,)).view(dtype)
-    # EXPECTED_VAL = 2.0
+    expected = x + y
+    actual = np.genfromtxt(out_path, delimiter=",", dtype=conversion_type)
+    actual = actual.reshape((N,)).view(_normalized_dtype(dtype))
+    assert np.allclose(actual, x + y)
 
     # def compute_stats(x):
     #     actual_counts = np.isclose(x, EXPECTED_VAL).sum()
