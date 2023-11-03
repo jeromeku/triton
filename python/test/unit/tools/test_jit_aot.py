@@ -310,6 +310,65 @@ class DataGeneratorType(StrEnum):
     TORCH = "torch"
 
 
+def _generate_dummy_data(
+    dir,
+    shape,
+    file_name,
+    dtype,
+    generator_type=DataGeneratorType.TORCH,
+    gen_fn="ones",
+    ext="csv",
+):
+    generator_ty = torch if generator_type == DataGeneratorType.TORCH else np
+    assert isinstance(dtype, generator_ty.dtype)
+    assert hasattr(generator_ty, gen_fn)
+
+    generator = getattr(generator_ty, gen_fn)
+
+    x = generator(shape, dtype=dtype)
+    x_path = os.path.join(dir, f"{file_name}.{ext}")
+    if dtype == generator_ty.float16:
+        write_dtype = generator_ty.int16
+    elif dtype == generator_ty.float32:
+        write_dtype = generator_ty.int32
+    else:
+        write_dtype = dtype
+
+    out_arr = x.view(write_dtype).reshape(-1)
+    if DataGeneratorType.TORCH:
+        out_arr = out_arr.cpu().numpy()
+    out_arr.tofile(x_path, sep=",")
+
+    return x, x_path
+
+
+def normalize_dtype_to_np(ty) -> np.dtype:
+    return getattr(np, str(ty).split(".")[-1])
+
+
+def normalize_serialized_dtype(dtype):
+    # read data and compare against reference
+    if "float16" in str(dtype):
+        conversion_type = np.int16
+    elif "float32" in str(dtype):
+        conversion_type = np.int32
+    else:
+        conversion_type = normalize_dtype_to_np(dtype)
+    return conversion_type
+
+
+def serialize_data_to_disk(x, save_dir, file_name, ext="csv"):
+    if isinstance(x, torch.Tensor):
+        x = x.cpu().numpy()
+
+    conversion_type = normalize_serialized_dtype(x.dtype)
+
+    save_path = os.path.join(save_dir, file_name + f".{ext}")
+    x.view(conversion_type).reshape(-1).tofile(save_path, sep=",")
+
+    return x, save_path
+
+
 def generate_dummy_data(
     dir,
     shape,
@@ -390,6 +449,13 @@ def test_aot_jit_add(dtype):
     N = 1024
     BLOCK_SIZE = 1024
     NUM_WARPS = 4
+    seed = 0
+    test_data_fn = "ones"
+    data_generator = getattr(torch, test_data_fn)
+    executable_name = "test"
+
+    x = data_generator(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
+    y = data_generator(N, dtype=dtype, device="cuda")
 
     test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
 
@@ -403,13 +469,10 @@ def test_aot_jit_add(dtype):
         from triton.runtime.jit import JITFunction
 
         test_fn = JITFunction(test_kernel)
-        x = torch.ones(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
-        y = torch.ones(N, dtype=dtype, device="cuda")
         output = torch.empty_like(x)
         grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
-
         # Run aot jit
-        bin, kernel_path = test_fn[grid](
+        _, kernel_path = test_fn[grid](
             x,
             y,
             output,
@@ -422,9 +485,6 @@ def test_aot_jit_add(dtype):
     tt_type = ty_to_TT(x)
     dtype_in = dtype_out = TT_to_C(tt_type)
 
-    print("dtype_in: ", dtype_in)
-
-    executable_name = "test"
     # TODO: Add way to manually set kernel path
     kernel_name = test_fn.__name__
 
@@ -437,20 +497,9 @@ def test_aot_jit_add(dtype):
     data_dir = Path("test_data").absolute()
     check_dir(data_dir)
 
-    x, x_path = generate_dummy_data(
-        data_dir,
-        shape=(N,),
-        generator_type=DataGeneratorType.TORCH,
-        file_name="x",
-        dtype=dtype,
-    )
-    y, y_path = generate_dummy_data(
-        data_dir,
-        shape=(N,),
-        generator_type=DataGeneratorType.TORCH,
-        file_name="y",
-        dtype=dtype,
-    )
+    x, x_path = serialize_data_to_disk(x, data_dir, "x")
+
+    y, y_path = serialize_data_to_disk(y, data_dir, "y")
     out_path = os.path.join(data_dir, "out.csv")
 
     # run test case
@@ -465,34 +514,15 @@ def test_aot_jit_add(dtype):
     )
     assert os.path.exists(out_path)
 
-    shutil.rmtree(test_dir)
-
-    def _normalized_dtype(ty) -> np.dtype:
-        return getattr(np, str(dtype).split(".")[-1])
-
-    # read data and compare against reference
-    if "float16" in str(dtype):
-        conversion_type = np.int16
-    elif "float32" in str(dtype):
-        conversion_type = np.int32
-    else:
-        conversion_type = _normalized_dtype(dtype)
-
     expected = x + y
+    conversion_type = normalize_serialized_dtype(dtype)
     actual = np.genfromtxt(out_path, delimiter=",", dtype=conversion_type)
-    actual = actual.reshape((N,)).view(_normalized_dtype(dtype))
-    assert np.allclose(actual, x + y)
+    actual = actual.reshape((N,)).view(normalize_dtype_to_np(dtype))
 
-    # def compute_stats(x):
-    #     actual_counts = np.isclose(x, EXPECTED_VAL).sum()
-    #     return actual_counts
+    assert np.allclose(actual, expected)
 
-    # print(f"ACTUAL counts: {compute_stats(actual)}")
-    # print(f"Actual: {actual[:10]} {actual[-10:]}")
-
-    # # Run test
-    # # output_torch = x + y
-    # # output_triton = test_fn(x, y)
+    # Clean up
+    shutil.rmtree(test_dir)
 
 
 # def _test_compile_link_add():
