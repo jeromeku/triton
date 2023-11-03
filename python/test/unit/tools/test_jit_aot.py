@@ -453,6 +453,17 @@ def clear_triton_cache():
     yield
 
 
+# TODO:
+# Add test for multiple traces
+# Refactor AOT tracing
+# Automate python -> Rust compilation
+# Test PTX NVRTC compilation
+
+
+def test_multiple_traces_add():
+    pass
+
+
 @pytest.mark.parametrize(
     "dtype",
     [torch.float32],
