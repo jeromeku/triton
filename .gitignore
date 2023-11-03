@@ -45,3 +45,4 @@ docs/getting-started/tutorials
 .vscode
 .vs
 *.log
+test_data

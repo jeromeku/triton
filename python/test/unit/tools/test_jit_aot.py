@@ -437,6 +437,76 @@ def TT_to_C(ty_str):
     return _TT_TO_C[ty_str.replace("*", "")]
 
 
+@pytest.fixture(scope="session")
+def clear_triton_cache():
+    from triton.runtime.cache import default_cache_dir, default_dump_dir
+
+    cache_dir = default_cache_dir()
+    dump_dir = default_dump_dir()
+
+    if os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+
+    if os.path.exists(dump_dir):
+        shutil.rmtree(dump_dir)
+
+    yield
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [torch.float32],
+    ids=lambda x: str(x),
+)
+@pytest.mark.parametrize("test_data_fn", ["ones"])
+def test_aot_cubin_add(dtype, test_data_fn, clear_triton_cache):
+    if test_data_fn == "randn" and "int" in str(dtype):
+        pytest.skip("randn not supported for int types")
+    # Test params
+    N = 1024
+    BLOCK_SIZE = 1024
+    NUM_WARPS = 4
+    seed = 0
+    data_generator = getattr(torch, test_data_fn)
+    executable_name = "test"
+
+    torch.manual_seed(seed)
+    x = data_generator(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
+    y = data_generator(N, dtype=dtype, device="cuda")
+
+    test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
+
+    # Set up aot kernel directory
+    test_dir = Path("aot_compilation").absolute()
+    check_dir(test_dir)
+
+    with MonkeyPatch.context() as mp:
+        mp.setenv("TRITON_AOT_KERNEL_DIR", str(test_dir))
+        print("TRITON_AOT_KERNEL_DIR: ", os.environ["TRITON_AOT_KERNEL_DIR"])
+        from triton.runtime.jit import JITFunction
+
+        test_fn = JITFunction(test_kernel)
+        kernel_name = test_fn.__name__
+        output = torch.empty_like(x)
+        grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
+        # Run aot jit
+        bin = test_fn[grid](
+            x,
+            y,
+            output,
+            N,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=NUM_WARPS,
+            compile_so=False,
+        )
+
+    with open(test_dir / f"{kernel_name}.cubin", "wb") as f:
+        f.write(bin.asm["cubin"])
+
+    with open(test_dir / f"{kernel_name}.ptx", "w") as f:
+        f.write(bin.asm["ptx"])
+
+
 @pytest.mark.parametrize(
     "dtype",
     [torch.float16, torch.float32, torch.int16, torch.int32],
@@ -462,7 +532,7 @@ def test_aot_jit_add(dtype, test_data_fn):
     test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
 
     # Set up aot kernel directory
-    test_dir = Path("aot_test_kernels").absolute()
+    test_dir = Path("aot_compilation").absolute()
     check_dir(test_dir)
 
     with MonkeyPatch.context() as mp:
@@ -483,6 +553,8 @@ def test_aot_jit_add(dtype, test_data_fn):
             num_warps=NUM_WARPS,
             compile_so=True,
         )
+    # DUMP MLIR_IR
+    # Compilation pipeline: PTX and CUBIN generation
 
     tt_type = ty_to_TT(x)
     dtype_in = dtype_out = TT_to_C(tt_type)
@@ -524,7 +596,7 @@ def test_aot_jit_add(dtype, test_data_fn):
     assert np.allclose(actual, expected)
 
     # Clean up
-    shutil.rmtree(test_dir)
+    # shutil.rmtree(test_dir)
 
 
 # def _test_compile_link_add():
