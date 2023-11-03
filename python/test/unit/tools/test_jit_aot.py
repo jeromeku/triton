@@ -442,18 +442,20 @@ def TT_to_C(ty_str):
     [torch.float16, torch.float32, torch.int16, torch.int32],
     ids=lambda x: str(x),
 )
-def test_aot_jit_add(dtype):
+@pytest.mark.parametrize("test_data_fn", ["ones", "randn"])
+def test_aot_jit_add(dtype, test_data_fn):
     # Set up test
-
+    if test_data_fn == "randn" and "int" in str(dtype):
+        pytest.skip("randn not supported for int types")
     # Test params
     N = 1024
     BLOCK_SIZE = 1024
     NUM_WARPS = 4
     seed = 0
-    test_data_fn = "ones"
     data_generator = getattr(torch, test_data_fn)
     executable_name = "test"
 
+    torch.manual_seed(seed)
     x = data_generator(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
     y = data_generator(N, dtype=dtype, device="cuda")
 
