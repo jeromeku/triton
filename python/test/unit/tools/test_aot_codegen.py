@@ -2,6 +2,7 @@ import os
 from typing import Dict, List
 
 from triton.tools.aot import KernelLinkerMeta
+from triton.tools.aot.codegen import HeaderGenerator, SourceGenerator
 
 
 def _preprocess_src(src):
@@ -73,39 +74,28 @@ def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
         assert expected == actual
 
 
-def test_aot_linker_func_pointer_defs(parsed_kernel_metas, reference_func_pointer_defs):
-    from triton.tools.aot import SourceGenerator
-
-    src_gen = SourceGenerator(kernels=parsed_kernel_metas)
-    defs = src_gen.make_func_pointers()
+def test_aot_linker_func_pointer_defs(
+    source_generator: SourceGenerator, reference_func_pointer_defs
+):
+    defs = source_generator.make_func_pointers()
     print(f"defs:\n{defs}")
     print(f"reference:\n{reference_func_pointer_defs}")
     check_codegen(actual=defs, expected=reference_func_pointer_defs)
 
 
 def test_aot_linker_const_dispatcher_defs(
-    parsed_kernel_metas, reference_const_dispatcher_defs
+    source_generator: SourceGenerator,
+    reference_const_dispatcher_defs,
 ):
-    from triton.tools.aot import SourceGenerator
-
-    src_gen = SourceGenerator(kernels=parsed_kernel_metas)
-    defs = src_gen.make_kernel_meta_const_dispatcher()
+    defs = source_generator.make_kernel_meta_const_dispatcher()
     print(f"defs:\n{defs}")
     print(f"reference:\n{reference_const_dispatcher_defs}")
     check_codegen(actual=defs, expected=reference_const_dispatcher_defs)
 
 
 def test_aot_linker_source_gen_dispatcher_defs(
-    headers, linker_test_dir, reference_dispatcher_defs
+    source_generator: SourceGenerator, reference_dispatcher_defs
 ):
-    from triton.tools.aot import link
-    from triton.tools.aot.codegen import SourceGenerator
-
-    out_path = linker_test_dir / "kernel"
-    linker = link.Linker(headers, out_path=out_path.absolute())
-    kernels = linker.parse_headers()
-    header_file, meta = linker.generate_headers(kernels)
-    src_gen = SourceGenerator(kernels=kernels, meta=meta)
-    defs = src_gen.make_defs()
+    defs = source_generator.make_defs()
 
     check_codegen(actual=defs, expected=reference_dispatcher_defs)

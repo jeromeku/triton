@@ -163,3 +163,10 @@ CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdev
 }
 """
     return defs.strip()
+
+
+@pytest.fixture
+def source_generator(parsed_kernel_metas):
+    from triton.tools.aot.codegen import SourceGenerator
+
+    return SourceGenerator(kernels=parsed_kernel_metas)
