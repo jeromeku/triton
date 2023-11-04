@@ -538,7 +538,7 @@ def aot_kernel_dir():
 
 @pytest.fixture
 def headers():
-    headers_path = (Path(__file__).parent / "fixtures" / "linker").absolute()
+    headers_path = (Path(__file__).parent / "fixtures" / "compiler").absolute()
     return headers_path.glob("*.h")
 
 
@@ -556,15 +556,47 @@ def linker_test_dir():
     yield test_dir
 
 
-def test_aot_linker(headers, linker_test_dir):
+@pytest.fixture
+def reference_header():
+    header = """
+#include <cuda.h>
+
+CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
+void load_add_kernel_1024_warps4xstages3();
+void unload_add_kernel_1024_warps4xstages3();
+    
+int add_kernel_get_num_algos(void);
+
+CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
+CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements, int algo_id);
+void load_add_kernel();
+void unload_add_kernel();
+"""
+    return header.strip()
+
+
+def test_aot_linker(headers, linker_test_dir, reference_header):
+    import difflib
+
     from triton.tools.aot import link
 
     out_path = linker_test_dir / "kernel"
     linker = link.Linker(headers, out_path=out_path.absolute())
     kernels = linker.parse_headers()
-    header_file = linker.generate_headers(kernels)
+    header_file, meta = linker.generate_headers(kernels)
 
     assert os.path.exists(header_file)
+
+    with open(header_file, "r") as f:
+        actual_lines = [line.strip() for line in f]
+
+    expected_lines = [line.strip() for line in reference_header.split("\n")]
+
+    for expected, actual in zip(expected_lines, actual_lines):
+        assert expected == actual
+
+    # result = difflib.ndiff(actual_lines, expected_lines, linejunk=difflib.IS_LINE_JUNK)
+    # print("".join(result))
 
 
 @pytest.mark.parametrize("N", [1024])

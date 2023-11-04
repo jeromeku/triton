@@ -1,7 +1,7 @@
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional, Sequence, Union
+from typing import Dict, List, Optional, Sequence, Union
 
 from dataclasses import dataclass
 
@@ -40,7 +40,7 @@ class SignatureGenerator:
         return sig
 
 
-class HeaderParser:
+class _HeaderParser:
     linker_directives_pat = re.compile("//[\\s]*tt-linker:[\\s]*([\\w]+):(.+):(.+)")
     # [name, hash, suffix]
     kernel_name_pat = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
@@ -50,8 +50,17 @@ class HeaderParser:
     arg_suffix_pat = re.compile("[c,d]")
 
     @classmethod
-    def extract_linker_meta(cls, header: str):
+    def extract_linker_metas(cls, headers: List[str]):
         kernels = defaultdict(list)
+        for header in headers:
+            h_path = Path(header)
+            h_str = h_path.read_text()
+            kernels = cls._extract_linker_meta(h_str, kernels)
+
+        return kernels
+
+    @classmethod
+    def _extract_linker_meta(cls, header: str, kernels: Dict[str, KernelLinkerMeta]):
         for ln in header.splitlines():
             if ln.startswith("//"):
                 m = cls.linker_directives_pat.match(ln)
@@ -84,6 +93,7 @@ class HeaderParser:
                                 )
 
                     kernels[name].append(kernel)
+
         return kernels
 
     @classmethod
@@ -129,6 +139,100 @@ class HeaderParser:
             else:
                 sizes.extend([None] * (len(args) - len(sizes)))
         return num_specs, sizes
+
+
+class HeaderParser:
+    def __init__(self) -> None:
+        import re
+
+        # [kernel_name, c signature]
+        self.linker_directives = re.compile(
+            "//[\\s]*tt-linker:[\\s]*([\\w]+):(.+):(.+)"
+        )
+        # [name, hash, suffix]
+        self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
+        # [(type, name)]
+        self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
+        # [d|c]
+        self.arg_suffix = re.compile("[c,d]")
+
+        self.kernels = defaultdict(list)
+
+    def extract_linker_meta(self, header: str):
+        for ln in header.splitlines():
+            if ln.startswith("//"):
+                m = self.linker_directives.match(ln)
+                if _exists(m):
+                    ker_name, c_sig, algo_info = m.group(1), m.group(2), m.group(3)
+                    name, sig_hash, suffix = self._match_name(ker_name)
+                    c_types, arg_names = self._match_c_sig(c_sig)
+                    num_specs, sizes = self._match_suffix(suffix, c_sig)
+                    self._add_kernel(
+                        "_".join([name, algo_info]),
+                        KernelLinkerMeta(
+                            orig_kernel_name=name,
+                            arg_names=arg_names,
+                            arg_ctypes=c_types,
+                            sizes=sizes,
+                            sig_hash=sig_hash,
+                            triton_suffix=suffix,
+                            suffix=suffix,
+                            num_specs=num_specs,
+                        ),
+                    )
+
+    def _match_name(self, ker_name: str):
+        m = self.kernel_name.match(ker_name)
+        if _exists(m):
+            name, sig_hash, suffix = m.group(1), m.group(2), m.group(3)
+            return name, sig_hash, suffix
+        raise LinkerError(f"{ker_name} is not a valid kernel name")
+
+    def _match_c_sig(self, c_sig: str):
+        m = self.c_sig.findall(c_sig)
+        if len(m):
+            tys, args = [], []
+            for ty, arg_name in m:
+                tys.append(ty)
+                args.append(arg_name)
+            return tys, args
+
+        raise LinkerError(f"{c_sig} is not a valid argument signature")
+
+    def _match_suffix(self, suffix: str, c_sig: str):
+        args = c_sig.split(",")
+        s2i = {"c": 1, "d": 16}
+        num_specs = 0
+        sizes = []
+        # scan through suffix, first find the index,
+        # then see if it is followed by d or c
+        for i in range(len(args)):
+            pos = suffix.find(str(i))
+            if pos == -1:
+                raise LinkerError(f"{suffix} is not a valid kernel suffix")
+            pos += len(str(i))
+            if self.arg_suffix.match(suffix, pos):
+                num_specs += 1
+                sizes.extend([None] * (i - len(sizes)))
+                sizes.append(s2i[suffix[pos]])
+                pos += 1
+            if i < len(args) - 1:
+                suffix = suffix[pos:]
+            else:
+                sizes.extend([None] * (len(args) - len(sizes)))
+        return num_specs, sizes
+
+    def _add_kernel(self, name: str, ker: KernelLinkerMeta):
+        if name in self.kernels:
+            last: KernelLinkerMeta = self.kernels[name][-1]
+
+            for cur, new_ in zip(last.arg_ctypes, ker.arg_ctypes):
+                if cur != new_:
+                    raise LinkerError(
+                        f"Mismatched signature for kernel {name}: \n\texisting sig is: {','.join(last.arg_ctypes)}\n\tcurrent is: {','.join(ker.arg_ctypes)}"
+                    )
+
+        self.kernels[name].append(ker)
 
 
 class HeaderGenerator:

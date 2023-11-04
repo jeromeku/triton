@@ -35,7 +35,7 @@ class Linker:
         self.headers = headers
         self.out_path = out_path if isinstance(out_path, Path) else Path(out_path)
         self.prefix = prefix
-        self.header_parser = header_parser
+        self.header_parser = header_parser()
         self.header_generator = header_generator
 
     def run(self):
@@ -44,11 +44,9 @@ class Linker:
         self.generate_sources(meta)
 
     def parse_headers(self):
-        includes = []
         for header in self.headers:
             h_path = Path(header)
             h_str = h_path.read_text()
-            includes.append(h_path.name)
             self.header_parser.extract_linker_meta(h_str)
 
         return self.header_parser.kernels
@@ -72,13 +70,13 @@ class Linker:
             algo_decls=algo_decl_str,
             get_num_algos_decl=get_num_algos_decl_str,
             global_decl=global_decl_str,
-        )
+        ).strip()
 
         output_file = self.out_path.with_suffix(".h")
         with output_file.open("w") as fp:
             fp.write(generated_header)
 
-        return meta
+        return output_file, meta
 
     def generate_sources(
         self, meta: KernelLinkerMeta, kernels: Dict[str, KernelLinkerMeta]
