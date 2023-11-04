@@ -203,6 +203,13 @@ class SourceGenerator:
         src += "}\n"
         return src
 
+    def make_default_algo_kernel_def(self, meta: KernelLinkerMeta = None) -> str:
+        meta = meta or self.meta
+        src = f"CUresult {meta.orig_kernel_name}_default(CUstream stream, {self.signature_generator.gen_signature_with_full_args(meta)}){{\n"
+        src += f"  return {meta.orig_kernel_name}(stream, {', '.join(meta.arg_names)}, 0);\n"
+        src += "}\n"
+        return src
+
 
 # DEFAULT_ALGO_KERNEL_TEMPLATE = """
 # CUresult {orig_kernel_name}_default(CUstream stream, {default_kernel_args}){{\n

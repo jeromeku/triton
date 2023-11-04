@@ -190,6 +190,16 @@ int add_kernel_get_num_algos(void){
 
 
 @pytest.fixture
+def reference_default_algo_def():
+    defs = """
+CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements){
+  return add_kernel(stream, x_ptr, y_ptr, output_ptr, n_elements, 0);
+}
+"""
+    return defs.strip()
+
+
+@pytest.fixture
 def header_generator(parsed_kernel_metas):
     from triton.tools.aot.codegen import HeaderGenerator
 

@@ -100,3 +100,10 @@ def test_aot_linker_get_num_algos_def(
 ):
     actual_defs = source_generator.make_get_num_algos_def()
     check_codegen(actual_defs, reference_get_num_algos_def)
+
+
+def test_aot_linker_default_algo_def(
+    source_generator: SourceGenerator, reference_default_algo_def
+):
+    actual_def = source_generator.make_default_algo_kernel_def()
+    check_codegen(actual_def, reference_default_algo_def)
