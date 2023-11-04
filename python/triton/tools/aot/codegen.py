@@ -40,111 +40,8 @@ class SignatureGenerator:
         return sig
 
 
-class _HeaderParser:
-    linker_directives_pat = re.compile("//[\\s]*tt-linker:[\\s]*([\\w]+):(.+):(.+)")
-    # [name, hash, suffix]
-    kernel_name_pat = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
-    # [(type, name)]
-    c_sig_pat = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
-    # [d|c]
-    arg_suffix_pat = re.compile("[c,d]")
-
-    @classmethod
-    def extract_linker_metas(cls, headers: List[str]):
-        kernels = defaultdict(list)
-        for header in headers:
-            h_path = Path(header)
-            h_str = h_path.read_text()
-            kernels = cls._extract_linker_meta(h_str, kernels)
-
-        return kernels
-
-    @classmethod
-    def _extract_linker_meta(cls, header: str, kernels: Dict[str, KernelLinkerMeta]):
-        for ln in header.splitlines():
-            if ln.startswith("//"):
-                m = cls.linker_directives_pat.match(ln)
-
-                if _exists(m):
-                    ker_name, c_sig, algo_info = m.group(1), m.group(2), m.group(3)
-                    name, sig_hash, suffix = cls._match_name(ker_name)
-                    c_types, arg_names = cls._match_c_sig(c_sig)
-                    num_specs, sizes = cls._match_suffix(suffix, c_sig)
-
-                    name = "_".join([name, algo_info])
-                    kernel = KernelLinkerMeta(
-                        orig_kernel_name=name,
-                        arg_names=arg_names,
-                        arg_ctypes=c_types,
-                        sizes=sizes,
-                        sig_hash=sig_hash,
-                        triton_suffix=suffix,
-                        suffix=suffix,
-                        num_specs=num_specs,
-                    )
-
-                    if name in kernels:
-                        last: KernelLinkerMeta = kernels[name][-1]
-
-                        for cur, new_ in zip(last.arg_ctypes, kernel.arg_ctypes):
-                            if cur != new_:
-                                raise LinkerError(
-                                    f"Mismatched signature for kernel {name}: \n\texisting sig is: {','.join(last.arg_ctypes)}\n\tcurrent is: {','.join(kernel.arg_ctypes)}"
-                                )
-
-                    kernels[name].append(kernel)
-
-        return kernels
-
-    @classmethod
-    def _match_name(cls, ker_name: str):
-        m = cls.kernel_name_pat.match(ker_name)
-        if _exists(m):
-            name, sig_hash, suffix = m.group(1), m.group(2), m.group(3)
-            return name, sig_hash, suffix
-        raise LinkerError(f"{ker_name} is not a valid kernel name")
-
-    @classmethod
-    def _match_c_sig(cls, c_sig: str):
-        m = cls.c_sig_pat.findall(c_sig)
-        if len(m):
-            tys, args = [], []
-            for ty, arg_name in m:
-                tys.append(ty)
-                args.append(arg_name)
-            return tys, args
-
-        raise LinkerError(f"{c_sig} is not a valid argument signature")
-
-    @classmethod
-    def _match_suffix(cls, suffix: str, c_sig: str):
-        args = c_sig.split(",")
-        s2i = {"c": 1, "d": 16}
-        num_specs = 0
-        sizes = []
-        # scan through suffix, first find the index,
-        # then see if it is followed by d or c
-        for i in range(len(args)):
-            pos = suffix.find(str(i))
-            if pos == -1:
-                raise LinkerError(f"{suffix} is not a valid kernel suffix")
-            pos += len(str(i))
-            if cls.arg_suffix_pat.match(suffix, pos):
-                num_specs += 1
-                sizes.extend([None] * (i - len(sizes)))
-                sizes.append(s2i[suffix[pos]])
-                pos += 1
-            if i < len(args) - 1:
-                suffix = suffix[pos:]
-            else:
-                sizes.extend([None] * (len(args) - len(sizes)))
-        return num_specs, sizes
-
-
 class HeaderParser:
     def __init__(self) -> None:
-        import re
-
         # [kernel_name, c signature]
         self.linker_directives = re.compile(
             "//[\\s]*tt-linker:[\\s]*([\\w]+):(.+):(.+)"
@@ -235,47 +132,46 @@ class HeaderParser:
         self.kernels[name].append(ker)
 
 
-class HeaderGenerator:
-    signature_generator = SignatureGenerator
-    ALGO_DECL_TEMPLATE = """
+DEFAULT_ALGO_DECL_TEMPLATE = """
 CUresult {name}(CUstream stream, {args});
 void load_{name}();
 void unload_{name}();
 """
-    GLOBAL_DECL_TEMPLATE = """
+
+DEFAULT_GLOBAL_DECL_TEMPLATE = """
 CUresult {orig_kernel_name}_default(CUstream stream, {default_args});
 CUresult {orig_kernel_name}(CUstream stream, {full_args}, int algo_id);
 void load_{orig_kernel_name}();
 void unload_{orig_kernel_name}();
 """
 
-    @staticmethod
-    def make_algo_decls(name: str, metas: Sequence[KernelLinkerMeta]) -> str:
+
+class HeaderGenerator:
+    signature_generator = SignatureGenerator
+    ALGO_DECL_TEMPLATE = DEFAULT_ALGO_DECL_TEMPLATE
+    GLOBAL_DECL_TEMPLATE = DEFAULT_GLOBAL_DECL_TEMPLATE
+
+    @classmethod
+    def make_algo_decls(cls, name: str, metas: Sequence[KernelLinkerMeta]) -> str:
         """Generate declarations of kernels with meta-parameter and constant values"""
-        args = HeaderGenerator.signature_generator.gen_signature_with_full_args(
-            metas[-1]
-        )
-        return HeaderGenerator.ALGO_DECL_TEMPLATE.format(
+        args = cls.signature_generator.gen_signature_with_full_args(metas[-1])
+        return cls.ALGO_DECL_TEMPLATE.format(
             name=name,
             args=args,
         )
 
-    @staticmethod
-    def make_get_num_algos_decl(meta: KernelLinkerMeta) -> str:
+    @classmethod
+    def make_get_num_algos_decl(cls, meta: KernelLinkerMeta) -> str:
         src = f"int {meta.orig_kernel_name}_get_num_algos(void);"
         return src
 
-    @staticmethod
-    def make_global_decl(meta: KernelLinkerMeta) -> str:
+    @classmethod
+    def make_global_decl(cls, meta: KernelLinkerMeta) -> str:
         """Generate declarations of kernels with meta-parameter and constant values"""
-        return HeaderGenerator.GLOBAL_DECL_TEMPLATE.format(
+        return cls.GLOBAL_DECL_TEMPLATE.format(
             orig_kernel_name=meta.orig_kernel_name,
-            default_args=HeaderGenerator.signature_generator.gen_signature_with_full_args(
-                meta
-            ),
-            full_args=HeaderGenerator.signature_generator.gen_signature_with_full_args(
-                meta
-            ),
+            default_args=cls.signature_generator.gen_signature_with_full_args(meta),
+            full_args=cls.signature_generator.gen_signature_with_full_args(meta),
         )
 
 

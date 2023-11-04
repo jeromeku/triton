@@ -576,8 +576,6 @@ void unload_add_kernel();
 
 
 def test_aot_linker(headers, linker_test_dir, reference_header):
-    import difflib
-
     from triton.tools.aot import link
 
     out_path = linker_test_dir / "kernel"
