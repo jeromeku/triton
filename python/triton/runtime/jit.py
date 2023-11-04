@@ -27,6 +27,13 @@ from ..common.backend import get_backend, get_cuda_version_key
 from .interpreter import InterpretedFunction
 from triton.debugging import logger
 from triton.debugging.debugging import TRITON_AOT_KERNEL_DIR
+from triton.tools.jitted_aot import (
+    CompiledArtifact,
+    Grid,
+    JITCompileArgs,
+    create_AOT_artifacts,
+    link_aot_artifacts,
+)
 
 
 def get_cuda_stream(idx=None):
@@ -479,8 +486,7 @@ class JITFunction(KernelInterface[T]):
         device = get_special_arg("device")
         device_type = get_special_arg("device_type")
         compile_so = get_special_arg("compile_so", False)
-        
-        
+
         # Bind the remaining arguments to `fn`.
         bound_args = self.signature.bind(*args, **kwargs)
         bound_args.apply_defaults()
@@ -602,42 +608,6 @@ class JITFunction(KernelInterface[T]):
                 configs,
             ):
                 return None
-            from typing import Any, Dict
-
-            from dataclasses import dataclass
-
-            @dataclass
-            class CompileArgs(dict):
-                signature: Dict[int, str]
-                device: int
-                constants: dict[int, Any]
-                num_warps: int
-                num_ctas: int
-                num_stages: int
-                enable_warp_specialization: bool
-                enable_fp_fusion: bool
-                extern_libs: Dict[str, str]
-                configs: list
-                debug: bool
-                device_type: str
-
-                def __post_init__(self):
-                    self.update(self.__dict__)
-
-            self._compile_args = CompileArgs(
-                signature=signature,
-                device=device,
-                constants=constants,
-                num_warps=num_warps,
-                num_ctas=num_ctas,
-                num_stages=num_stages,
-                enable_warp_specialization=enable_warp_specialization,
-                enable_fp_fusion=enable_fp_fusion,
-                extern_libs=extern_libs,
-                configs=configs,
-                debug=self.debug,
-                device_type=device_type,
-            )
 
             self.cache[device][key] = compile(
                 self,
@@ -674,8 +644,9 @@ class JITFunction(KernelInterface[T]):
                 bin,
                 *bin.assemble_tensormap_to_arg(non_constexpr_arg_values),
             )
+
         if compile_so:
-            self._compile_args = CompileArgs(
+            jit_args = JITCompileArgs(
                 signature=signature,
                 device=device,
                 constants=constants,
@@ -688,121 +659,13 @@ class JITFunction(KernelInterface[T]):
                 configs=configs,
                 debug=self.debug,
                 device_type=device_type,
+                grid=Grid(grid_0, grid_1, grid_2),
             )
-            self._compiled_obj = bin
-
-            logger.bind(COMPILE_ARGS=self._compile_args).debug("COMPILE_ARGS")
-
-            def create_AOT_artifacts():
-                import binascii
-                from pathlib import Path
-
-                from triton.compiler.code_generator import kernel_suffix
-                from triton.compiler.make_launcher import ty_to_cpp
-
-                kernel = self
-                config = configs[0]
-
-                ## Create AOT artifacts
-                def hash_signature(signature: List[str]):
-                    m = hashlib.sha256()
-                    m.update(" ".join(signature).encode())
-                    return m.hexdigest()[:8]
-
-                meta_sig = f"warps{num_warps}xstages{num_stages}"
-                signature_str = [str(s) for s in signature.values()]
-                sig_hash = hash_signature(signature_str + [meta_sig])
-                const_sig = "x".join([str(v) for v in constants.values()])
-                doc_string = [
-                    f"{kernel.arg_names[i]}={constants[i]}" for i in constants.keys()
-                ]
-                doc_string += [
-                    f"num_warps={num_warps}",
-                    f"num_stages={num_stages}",
-                ]
-
-                arg_names = []
-                arg_types = []
-                for i in signature.keys():
-                    if i not in config.equal_to_1:
-                        arg_names += [kernel.arg_names[i]]
-                        arg_types += [signature[i]]
-
-                # dump C stub code
-                suffix = kernel_suffix(signature.values(), config)
-                func_name = "_".join([self.__name__, sig_hash, suffix])
-                triton_kernel_name = "_".join([self.__name__, suffix])
-                hex_ = str(binascii.hexlify(bin.asm["cubin"]))[2:-1]
-                params = {
-                    "kernel_name": func_name,
-                    "triton_kernel_name": triton_kernel_name,
-                    "bin_size": len(hex_),
-                    "bin_data": ", ".join(
-                        [f"0x{x}{y}" for x, y in zip(hex_[::2], hex_[1::2])]
-                    ),
-                    "signature": ", ".join(
-                        [
-                            f"{ty_to_cpp(ty)} {name}"
-                            for name, ty in zip(arg_names, arg_types)
-                        ]
-                    ),
-                    "full_signature": ", ".join(
-                        [
-                            f"{ty_to_cpp(signature[i])} {kernel.arg_names[i]}"
-                            for i in signature.keys()
-                        ]
-                    ),
-                    "arg_pointers": ", ".join([f"&{arg}" for arg in arg_names]),
-                    "num_args": len(arg_names),
-                    "kernel_docstring": doc_string,
-                    "shared": bin.shared,
-                    "num_warps": num_warps,
-                    "algo_info": "_".join([const_sig, meta_sig]),
-                    "gridX": grid_0,
-                    "gridY": grid_1,
-                    "gridZ": grid_2,
-                    "_placeholder": "",
-                }
-                logger.bind(PARAMS=params).debug("AOT PARAMS")
-
-                kernel_dir = os.environ.get("TRITON_AOT_KERNEL_DIR", TRITON_AOT_KERNEL_DIR)
-                out_dir = Path(kernel_dir) / self.__name__
-                out_dir.mkdir(parents=True, exist_ok=True)
-
-                for ext in ["h", "c"]:
-                    template_path = (
-                        Path(__file__).parent.parent / "tools" / f"compile.{ext}"
-                    )
-                    out_name = Path(self.__name__).with_suffix(
-                        f".{sig_hash}_{suffix}.{ext}"
-                    )
-
-                    with (out_dir / out_name).open("w") as fp:
-                        fp.write(Path(template_path).read_text().format(**params))
-
-                return out_dir
-
-            def link_aot_artifacts(kernel_path):
-                import glob
-                import subprocess
-                import sys
-
-                import triton
-
-                linker_path = os.path.join(triton.tools.__path__[0], "link.py")
-
-                # link all desired configs
-                h_files = glob.glob(os.path.join(kernel_path, "*.h"))
-                subprocess.run(
-                    [sys.executable, linker_path] + h_files + ["-o", self.__name__],
-                    check=True,
-                    cwd=kernel_path,
-                )
-
             kernel_path = create_AOT_artifacts()
             link_aot_artifacts(kernel_path)
+            return CompiledArtifact(bin, kernel_path)
 
-        return bin if not compile_so else (bin, kernel_path)
+        return bin
 
     def __init__(
         self, fn, version=None, do_not_specialize=None, debug=None, noinline=None
