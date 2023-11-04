@@ -1,4 +1,4 @@
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from .parsers import KernelLinkerMeta
 
@@ -37,6 +37,8 @@ class HeaderGenerator:
 
     def __init__(self, kernels: Dict[str, KernelLinkerMeta]) -> None:
         self.kernels = kernels
+        meta_lists = [meta for name, meta in self.kernels.items()]
+        self.meta = meta_lists[0][0]
 
     def _make_algo_decl(self, name: str, metas: List[KernelLinkerMeta]):
         args = self.signature_generator.gen_signature_with_full_args(metas[-1])
@@ -54,15 +56,14 @@ class HeaderGenerator:
 
         return "\n".join(algo_decls).strip()
 
-    def make_get_num_algos_decl(self) -> str:
-        meta_lists = [meta for name, meta in self.kernels.items()]
-        meta = meta_lists[0][0]
-
+    def make_get_num_algos_decl(self, meta: Optional[KernelLinkerMeta] = None) -> str:
+        meta = meta or self.meta
         src = f"int {meta.orig_kernel_name}_get_num_algos(void);"
         return src
 
-    def make_global_decl(self, meta: KernelLinkerMeta) -> str:
+    def make_global_decl(self, meta: Optional[KernelLinkerMeta] = None) -> str:
         """Generate declarations of kernels with meta-parameter and constant values"""
+        meta = meta or self.meta
         return self.GLOBAL_DECL_TEMPLATE.format(
             orig_kernel_name=meta.orig_kernel_name,
             default_args=self.signature_generator.gen_signature_with_full_args(meta),

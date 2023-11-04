@@ -108,7 +108,7 @@ int add_kernel_get_num_algos(void);
 
 
 @pytest.fixture
-def reference_header_kernel_default_load():
+def reference_global_decl():
     src = """
 CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
 CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements, int algo_id);
@@ -192,10 +192,20 @@ def test_aot_linker_algo_get_num_algo_decl(
 
     header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
     actual_decl = header_gen.make_get_num_algos_decl()
+    check_codegen(actual_decl, reference_get_num_algo_decl)
+
+
+def test_aot_linker_global_decl(
+    parsed_kernel_metas: Dict[str, List[KernelLinkerMeta]], reference_global_decl
+):
+    from triton.tools.aot import HeaderGenerator
+
+    header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
+    actual_decl = header_gen.make_global_decl()
     print("actual_decl:\n", actual_decl)
     print("\n")
-    print("reference_header_kernel_decl:\n", reference_get_num_algo_decl)
-    check_codegen(actual_decl, reference_get_num_algo_decl)
+    print("reference_header_kernel_decl:\n", reference_global_decl)
+    check_codegen(actual_decl, reference_global_decl)
 
 
 def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
