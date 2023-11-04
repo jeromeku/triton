@@ -256,26 +256,26 @@ def make_get_num_algos_def(meta: KernelLinkerMeta) -> str:
     return src
 
 
+DEFAULT_HEADER_PARSER = HeaderParser()
+
+
 class Linker:
     """
     Generates dispatcher code for from compiled triton kernels
     """
 
     HEADER_TEMPLATE = """
-    #include <cuda.h>
-    
-    {algo_decls}
-    
-    {get_num_algos_decl}
-    
-    {global_decl}
-    """
+#include <cuda.h>
+{algo_decls}
+{get_num_algos_decl}
+{global_decl}
+"""
 
     def __init__(
         self,
         headers: List[str],
         out_path: Path,
-        header_parser=HeaderParser,
+        header_parser=DEFAULT_HEADER_PARSER,
         prefix: Optional[str] = "",
     ):
         """
@@ -305,21 +305,25 @@ class Linker:
 
     def generate_headers(self, kernels):
         algo_decls = [make_algo_decls(name, meta) for name, meta in kernels.items()]
+        algo_decl_str = "\n".join(algo_decls)
 
         meta_lists = [meta for _, meta in kernels.items()]
         meta = meta_lists[0][0]
 
-        get_num_algos_decl = make_get_num_algos_decl(meta)
-        global_decl = make_global_decl(meta)
+        get_num_algos_decl_str = make_get_num_algos_decl(meta)
+        global_decl_str = make_global_decl(meta)
 
         generated_header = self.HEADER_TEMPLATE.format(
-            algo_decls=algo_decls,
-            get_num_algos_decl=get_num_algos_decl,
-            global_decl=global_decl,
+            algo_decls=algo_decl_str,
+            get_num_algos_decl=get_num_algos_decl_str,
+            global_decl=global_decl_str,
         )
 
-        with self.out_path.with_suffix(".h").open("w") as fp:
+        output_file = self.out_path.with_suffix(".h")
+        with output_file.open("w") as fp:
             fp.write(generated_header)
+
+        return output_file
 
         # with self.out_name.with_suffix(".h").open("w") as fp:
         #     out = "#include <cuda.h>\n"

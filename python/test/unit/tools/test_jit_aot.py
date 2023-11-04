@@ -536,6 +536,37 @@ def aot_kernel_dir():
 #    shutil.rmtree(test_dir)
 
 
+@pytest.fixture
+def headers():
+    headers_path = (Path(__file__).parent / "fixtures" / "linker").absolute()
+    return headers_path.glob("*.h")
+
+
+@pytest.fixture
+def linker_test_dir():
+    test_dir = (Path(__file__).parent / "linker_test").absolute()
+
+    if os.path.exists(test_dir):
+        import shutil
+
+        shutil.rmtree(test_dir)
+
+    os.makedirs(test_dir)
+
+    yield test_dir
+
+
+def test_aot_linker(headers, linker_test_dir):
+    from triton.tools.aot import link
+
+    out_path = linker_test_dir / "kernel"
+    linker = link.Linker(headers, out_path=out_path.absolute())
+    kernels = linker.parse_headers()
+    header_file = linker.generate_headers(kernels)
+
+    assert os.path.exists(header_file)
+
+
 @pytest.mark.parametrize("N", [1024])
 @pytest.mark.parametrize("BLOCK_SIZE", [1024])
 @pytest.mark.parametrize(
