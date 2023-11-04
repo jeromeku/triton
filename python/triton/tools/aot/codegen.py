@@ -175,6 +175,17 @@ class SourceGenerator:
 
         return src
 
+    def make_kernel_meta_const_dispatcher(
+        self,
+        meta: KernelLinkerMeta = None,
+    ) -> str:
+        meta = meta or self.meta
+        src = f"CUresult {meta.orig_kernel_name}(CUstream stream, {self.signature_generator.gen_signature_with_full_args(meta)}, int algo_id){{\n"
+        src += f"  assert (algo_id < (int)sizeof({meta.orig_kernel_name}_kernels));\n"
+        src += f"  return {meta.orig_kernel_name}_kernels[algo_id](stream, {', '.join(meta.arg_names)});\n"
+        src += "}\n"
+        return src
+
 
 # DEFAULT_ALGO_KERNEL_TEMPLATE = """
 # CUresult {orig_kernel_name}_default(CUstream stream, {default_kernel_args}){{\n

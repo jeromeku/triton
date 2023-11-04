@@ -152,3 +152,14 @@ kernel_func_t add_kernel_kernels[] = {
 };
 """
     return defs.strip()
+
+
+@pytest.fixture
+def reference_const_dispatcher_defs():
+    defs = """
+CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements, int algo_id){
+  assert (algo_id < (int)sizeof(add_kernel_kernels));
+  return add_kernel_kernels[algo_id](stream, x_ptr, y_ptr, output_ptr, n_elements);
+}
+"""
+    return defs.strip()
