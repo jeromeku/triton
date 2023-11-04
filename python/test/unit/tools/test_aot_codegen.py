@@ -93,3 +93,10 @@ def test_aot_linker_source_gen_dispatcher_defs(
 def test_aot_linker_load_defs(source_generator: SourceGenerator, reference_load_defs):
     actual_defs = source_generator.make_kernel_load_defs()
     check_codegen(actual_defs, reference_load_defs)
+
+
+def test_aot_linker_get_num_algos_def(
+    source_generator: SourceGenerator, reference_get_num_algos_def
+):
+    actual_defs = source_generator.make_get_num_algos_def()
+    check_codegen(actual_defs, reference_get_num_algos_def)

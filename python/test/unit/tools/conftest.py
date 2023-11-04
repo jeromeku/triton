@@ -180,6 +180,16 @@ void unload_add_kernel(void){
 
 
 @pytest.fixture
+def reference_get_num_algos_def():
+    defs = """
+int add_kernel_get_num_algos(void){
+  return (int)sizeof(add_kernel_kernels);
+}
+"""
+    return defs.strip()
+
+
+@pytest.fixture
 def header_generator(parsed_kernel_metas):
     from triton.tools.aot.codegen import HeaderGenerator
 

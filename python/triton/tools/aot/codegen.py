@@ -196,6 +196,13 @@ class SourceGenerator:
             src += "}\n\n"
         return src
 
+    def make_get_num_algos_def(self, meta: KernelLinkerMeta = None) -> str:
+        meta = meta or self.meta
+        src = f"int {meta.orig_kernel_name}_get_num_algos(void){{\n"
+        src += f"  return (int)sizeof({meta.orig_kernel_name}_kernels);\n"
+        src += "}\n"
+        return src
+
 
 # DEFAULT_ALGO_KERNEL_TEMPLATE = """
 # CUresult {orig_kernel_name}_default(CUstream stream, {default_kernel_args}){{\n
