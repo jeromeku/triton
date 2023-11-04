@@ -146,6 +146,17 @@ void unload_add_kernel_1024_warps4xstages3() {
     return defs.strip()
 
 
+@pytest.fixture
+def reference_func_pointer_defs():
+    defs = """
+typedef CUresult (*kernel_func_t)(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
+kernel_func_t add_kernel_kernels[] = {
+  add_kernel_1024_warps4xstages3,
+};
+"""
+    return defs.strip()
+
+
 def _preprocess_src(src):
     return list(filter(lambda x: x.strip(), src.split("\n")))
 
@@ -202,9 +213,6 @@ def test_aot_linker_global_decl(
 
     header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
     actual_decl = header_gen.make_global_decl()
-    print("actual_decl:\n", actual_decl)
-    print("\n")
-    print("reference_header_kernel_decl:\n", reference_global_decl)
     check_codegen(actual_decl, reference_global_decl)
 
 
@@ -225,6 +233,16 @@ def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
 
     for expected, actual in zip(expected_lines, actual_lines):
         assert expected == actual
+
+
+def test_aot_linker_func_pointer_defs(parsed_kernel_metas, reference_func_pointer_defs):
+    from triton.tools.aot import SourceGenerator
+
+    src_gen = SourceGenerator(kernels=parsed_kernel_metas)
+    defs = src_gen.make_func_pointers()
+    print(f"defs:\n{defs}")
+    print(f"reference:\n{reference_func_pointer_defs}")
+    check_codegen(actual=defs, expected=reference_func_pointer_defs)
 
 
 def test_aot_linker_source_gen_dispatcher_defs(

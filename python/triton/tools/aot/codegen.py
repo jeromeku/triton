@@ -37,7 +37,7 @@ class HeaderGenerator:
 
     def __init__(self, kernels: Dict[str, KernelLinkerMeta]) -> None:
         self.kernels = kernels
-        meta_lists = [meta for name, meta in self.kernels.items()]
+        meta_lists = [meta for _, meta in self.kernels.items()]
         self.meta = meta_lists[0][0]
 
     def _make_algo_decl(self, name: str, metas: List[KernelLinkerMeta]):
@@ -81,9 +81,14 @@ class SourceGenerator:
     DEFAULT_ALGO_DEFINITION_TEMPLATE = ""
 
     def __init__(
-        self, kernels: Dict[str, KernelLinkerMeta], meta: KernelLinkerMeta
+        self,
+        kernels: Dict[str, KernelLinkerMeta],
+        meta: Optional[KernelLinkerMeta] = None,
     ) -> None:
         self.kernels = kernels
+        if meta is None:
+            meta_lists = [meta for name, meta in self.kernels.items()]
+            meta = meta_lists[0][0]
         self.meta = meta
 
     def _condition_fn(self, val, hint):
@@ -159,6 +164,16 @@ class SourceGenerator:
         for name, metas in self.kernels.items():
             defs.append(self._make_kernel_hints_dispatcher(name, metas))
         return "\n".join(defs)
+
+    def make_func_pointers(self) -> str:
+        # the table of hint dispatchers
+        src = f"typedef CUresult (*kernel_func_t)(CUstream stream, {self.signature_generator.gen_signature_with_full_args(self.meta)});\n"
+        src += f"kernel_func_t {self.meta.orig_kernel_name}_kernels[] = {{\n"
+        for name in self.kernels.keys():
+            src += f"  {name},\n"
+        src += "};\n"
+
+        return src
 
 
 # DEFAULT_ALGO_KERNEL_TEMPLATE = """
