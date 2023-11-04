@@ -575,7 +575,43 @@ void unload_add_kernel();
     return header.strip()
 
 
-def test_aot_linker(headers, linker_test_dir, reference_header):
+@pytest.fixture
+def reference_dispatcher_defs():
+    defs = """
+// launcher for: add_kernel_1024_warps4xstages3
+CUresult add_kernel_8d4b99fa_0d1d2d3de(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
+
+CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements){
+  if ((x_ptr % 16 == 0) && (y_ptr % 16 == 0) && (output_ptr % 16 == 0) && (n_elements % 16 == 0))
+    return add_kernel_8d4b99fa_0d1d2d3de(stream, x_ptr, y_ptr, output_ptr, n_elements);
+
+  return CUDA_ERROR_INVALID_VALUE;
+}
+
+// load for: add_kernel_1024_warps4xstages3
+void load_add_kernel_8d4b99fa_0d1d2d3de();
+void load_add_kernel_1024_warps4xstages3() {
+  load_add_kernel_8d4b99fa_0d1d2d3de();
+}
+
+// unload for: add_kernel_1024_warps4xstages3
+void unload_add_kernel_8d4b99fa_0d1d2d3de();
+void unload_add_kernel_1024_warps4xstages3() {
+  unload_add_kernel_8d4b99fa_0d1d2d3de();
+}
+"""
+    return defs.strip()
+
+
+def check_codegen(actual: str, expected: str):
+    actual_lines = [line.strip() for line in actual.split("\n")]
+    expected_lines = [line.strip() for line in expected.split("\n")]
+
+    for actual, expected in zip(actual_lines, expected_lines):
+        assert actual == expected, "Expected: \n{expected}\nActual: \n{actual}"
+
+
+def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
     from triton.tools.aot import link
 
     out_path = linker_test_dir / "kernel"
@@ -593,8 +629,21 @@ def test_aot_linker(headers, linker_test_dir, reference_header):
     for expected, actual in zip(expected_lines, actual_lines):
         assert expected == actual
 
-    # result = difflib.ndiff(actual_lines, expected_lines, linejunk=difflib.IS_LINE_JUNK)
-    # print("".join(result))
+
+def test_aot_linker_source_gen_dispatcher_defs(
+    headers, linker_test_dir, reference_dispatcher_defs
+):
+    from triton.tools.aot import link
+    from triton.tools.aot.codegen import SourceGenerator
+
+    out_path = linker_test_dir / "kernel"
+    linker = link.Linker(headers, out_path=out_path.absolute())
+    kernels = linker.parse_headers()
+    header_file, meta = linker.generate_headers(kernels)
+    src_gen = SourceGenerator(kernels=kernels, meta=meta)
+    defs = src_gen.make_defs()
+
+    check_codegen(actual=defs, expected=reference_dispatcher_defs)
 
 
 @pytest.mark.parametrize("N", [1024])

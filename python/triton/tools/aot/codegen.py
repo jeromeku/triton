@@ -1,5 +1,4 @@
-from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Dict, List, Sequence
 
 from .parsers import KernelLinkerMeta
 
@@ -58,6 +57,96 @@ class HeaderGenerator:
             default_args=cls.signature_generator.gen_signature_with_full_args(meta),
             full_args=cls.signature_generator.gen_signature_with_full_args(meta),
         )
+
+
+class SourceGenerator:
+    signature_generator = SignatureGenerator
+    KERNEL_HINTS_DISPATCHER_TEMPLATE = ""
+    FUNCTION_POINTERS_DEFINITION_TEMPLATE = ""
+    KERNEL_CONST_DEFINITION_DISPATCHER_TEMPLATE = ""
+    KERNEL_LOAD_DEFINITION_TEMPLATE = ""
+    NUM_ALGOS_DEFINITION_TEMPLATE = ""
+    DEFAULT_ALGO_DEFINITION_TEMPLATE = ""
+
+    def __init__(
+        self, kernels: Dict[str, KernelLinkerMeta], meta: KernelLinkerMeta
+    ) -> None:
+        self.kernels = kernels
+        self.meta = meta
+
+    def _condition_fn(self, val, hint):
+        if hint == 16:
+            return f"({val} % {hint} == 0)"
+        elif hint == 1:
+            return f"({val} == {hint})"
+        else:
+            return None
+
+    def _make_dispatcher_conditions(self, metas: List[KernelLinkerMeta]):
+        src = ""
+        for meta in sorted(metas, key=lambda m: -m.num_specs):
+            conds = " && ".join(
+                [
+                    self._condition_fn(val, hint)
+                    for val, hint in zip(meta.arg_names, meta.sizes)
+                    if hint is not None
+                ]
+            )
+            src += (
+                f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
+            )  # Edge case where no specializations hence no dispatching required
+        return src
+
+    def _make_dispatcher_load_defs(self, name, metas):
+        src = ""
+        for mode in ["load", "unload"]:
+            src += f"\n// {mode} for: {name}\n"
+            for meta in sorted(metas, key=lambda m: -m.num_specs):
+                src += f"void {mode}_{meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}();\n"
+            src += f"void {mode}_{name}() {{"
+            src += "\n"
+            for meta in sorted(metas, key=lambda m: -m.num_specs):
+                src += f"  {mode}_{meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}();\n"
+            src += "}\n"
+        return src
+
+    def _make_kernel_hints_dispatcher(
+        self, name: str, metas: Sequence[KernelLinkerMeta]
+    ) -> str:
+        # generate dispatcher function for kernels with different integer value hints
+        docs_str = f"// launcher for: {name}\n"
+        fn_sig = ""
+        for meta in sorted(metas, key=lambda m: -m.num_specs):
+            fn_sig += f"CUresult {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(CUstream stream, {self.signature_generator.gen_signature(meta)});\n"
+        # src += "\n"
+
+        kernel_sig = f"CUresult {name}(CUstream stream, {self.signature_generator.gen_signature_with_full_args(metas[-1])}){{"
+        # src += "\n"
+
+        dispatcher_conds = self._make_dispatcher_conditions(metas)
+
+        arg_names = [arg for arg, hint in zip(meta.arg_names, meta.sizes) if hint != 1]
+        return_statements = f"    return {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(stream, {', '.join(arg_names)});\n"
+        return_statements += "\n"
+        return_statements += "  return CUDA_ERROR_INVALID_VALUE;\n"
+        return_statements += "}\n"
+
+        load_defs = self._make_dispatcher_load_defs(name, metas)
+
+        src = "\n".join(
+            [
+                docs_str + fn_sig,
+                kernel_sig,
+                dispatcher_conds + return_statements + load_defs,
+            ]
+        )
+        return src
+
+    def make_defs(self):
+        defs = []
+        for name, metas in self.kernels.items():
+            defs.append(self._make_kernel_hints_dispatcher(name, metas))
+        return "\n".join(defs)
 
 
 # DEFAULT_ALGO_KERNEL_TEMPLATE = """

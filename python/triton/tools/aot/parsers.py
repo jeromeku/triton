@@ -22,16 +22,14 @@ class KernelLinkerMeta:
     sig_hash: str
     triton_suffix: str
     suffix: str
-    num_specs: int
-    """ number of specialized arguments """
+    num_specs: int  # number of specialized arguments
 
 
-"""Header Parsing Regexes"""
-
-
-# [kernel_name, c signature]
 @dataclass
 class HeaderParsingPatterns:
+    """Header Parsing Regexes"""
+
+    # [kernel_name, c signature]
     LINKER_DIRECTIVES = re.compile("//[\\s]*tt-linker:[\\s]*([\\w]+):(.+):(.+)")
 
     # [name, hash, suffix]
