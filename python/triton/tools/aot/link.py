@@ -1,10 +1,8 @@
-from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Dict, List, Optional
 
-from dataclasses import dataclass
-
-from triton.tools.aot.codegen import HeaderGenerator, HeaderParser, KernelLinkerMeta
+from triton.tools.aot.codegen import HeaderGenerator
+from triton.tools.aot.parsers import HeaderParser, KernelLinkerMeta
 
 
 class Linker:
