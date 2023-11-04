@@ -186,6 +186,16 @@ class SourceGenerator:
         src += "}\n"
         return src
 
+    def make_kernel_load_defs(self, meta: KernelLinkerMeta = None) -> str:
+        meta = meta or self.meta
+        src = ""
+        for mode in ["load", "unload"]:
+            src += f"void {mode}_{meta.orig_kernel_name}(void){{\n"
+            for name in self.kernels.keys():
+                src += f"  {mode}_{name}();\n"
+            src += "}\n\n"
+        return src
+
 
 # DEFAULT_ALGO_KERNEL_TEMPLATE = """
 # CUresult {orig_kernel_name}_default(CUstream stream, {default_kernel_args}){{\n

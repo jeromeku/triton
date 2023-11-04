@@ -166,6 +166,20 @@ CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdev
 
 
 @pytest.fixture
+def reference_load_defs():
+    defs = """
+void load_add_kernel(void){
+  load_add_kernel_1024_warps4xstages3();
+}
+
+void unload_add_kernel(void){
+  unload_add_kernel_1024_warps4xstages3();
+}
+"""
+    return defs.strip()
+
+
+@pytest.fixture
 def header_generator(parsed_kernel_metas):
     from triton.tools.aot.codegen import HeaderGenerator
 
