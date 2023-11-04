@@ -1,15 +1,20 @@
 import binascii
+import glob
 import hashlib
 import os
+import subprocess
+import sys
 from collections import namedtuple
 from pathlib import Path
 from typing import Any, Dict, List
 
 from dataclasses import dataclass
 
+import triton
 from triton.compiler.code_generator import kernel_suffix
-from triton.compiler.compiler import CompiledFn
+from triton.compiler.compiler import CompiledKernel
 from triton.compiler.make_launcher import ty_to_cpp
+from triton.debugging import TRITON_AOT_KERNEL_DIR
 from triton.runtime.jit import JITFunction
 
 InstanceDescriptor = namedtuple(
@@ -20,7 +25,7 @@ InstanceDescriptor = namedtuple(
 
 @dataclass
 class CompiledArtifact:
-    bin: CompiledFn
+    bin: CompiledKernel
     kernel_path: str
 
 
@@ -38,14 +43,14 @@ class Grid:
 class JITCompileArgs(dict):
     signature: Dict[int, str]
     device: int
-    constants: Dict[int, Any]
+    constants: Dict[int, int]
     num_warps: int
     num_ctas: int
     num_stages: int
     enable_warp_specialization: bool
     enable_fp_fusion: bool
     extern_libs: Dict[str, str]
-    config: tuple[InstanceDescriptor]
+    configs: tuple[InstanceDescriptor]
     debug: bool
     device_type: str
     grid: Grid
@@ -60,7 +65,9 @@ def hash_signature(signature: List[str]):
     return m.hexdigest()[:8]
 
 
-def create_AOT_artifacts(jit_fn: JITFunction, jit_args: JITCompileArgs):
+def create_aot_kernel(
+    bin: CompiledKernel, jit_fn: JITFunction, jit_args: JITCompileArgs
+):
     kernel_name = jit_fn.__name__
     ## Create AOT artifacts
     meta_sig = f"warps{jit_args.num_warps}xstages{jit_args.num_stages}"
@@ -68,7 +75,8 @@ def create_AOT_artifacts(jit_fn: JITFunction, jit_args: JITCompileArgs):
     sig_hash = hash_signature(signature_str + [meta_sig])
     const_sig = "x".join([str(v) for v in jit_args.constants.values()])
     doc_string = [
-        f"{jit_fn.arg_names[i]}={jit_args.constants[i]}" for i in jit_args.keys()
+        f"{jit_fn.arg_names[i]}={jit_args.constants[i]}"
+        for i in jit_args.constants.keys()
     ]
     doc_string += [
         f"num_warps={jit_args.num_warps}",
@@ -126,16 +134,11 @@ def create_AOT_artifacts(jit_fn: JITFunction, jit_args: JITCompileArgs):
         with (out_dir / out_name).open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))
 
+    link_aot_kernel(out_dir, kernel_name)
     return out_dir
 
 
-def link_aot_artifacts(kernel_path, dispatcher_name):
-    import glob
-    import subprocess
-    import sys
-
-    import triton
-
+def link_aot_kernel(kernel_path, dispatcher_name):
     linker_path = os.path.join(triton.tools.__path__[0], "link.py")
 
     # link all desired configs

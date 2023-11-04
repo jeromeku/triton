@@ -458,6 +458,7 @@ def clear_triton_cache():
 # Refactor AOT tracing
 # Automate python -> Rust compilation
 # Test PTX NVRTC compilation
+# Refactor link.py to library
 
 
 def test_multiple_traces_add():
@@ -518,19 +519,36 @@ def test_aot_cubin_add(dtype, test_data_fn, clear_triton_cache):
         f.write(bin.asm["ptx"])
 
 
+@pytest.fixture
+def aot_kernel_dir():
+    test_dir = Path("aot_test_kernels").absolute()
+
+    if os.path.exists(test_dir):
+        import shutil
+
+        shutil.rmtree(test_dir)
+
+    os.makedirs(test_dir)
+
+    yield test_dir
+
+
+#    shutil.rmtree(test_dir)
+
+
+@pytest.mark.parametrize("N", [1024])
+@pytest.mark.parametrize("BLOCK_SIZE", [1024])
 @pytest.mark.parametrize(
     "dtype",
     [torch.float16, torch.float32, torch.int16, torch.int32],
     ids=lambda x: str(x),
 )
 @pytest.mark.parametrize("test_data_fn", ["ones", "randn"])
-def test_aot_jit_add(dtype, test_data_fn):
+def test_aot_jit_add(aot_kernel_dir, dtype, test_data_fn, N, BLOCK_SIZE):
     # Set up test
     if test_data_fn == "randn" and "int" in str(dtype):
         pytest.skip("randn not supported for int types")
     # Test params
-    N = 1024
-    BLOCK_SIZE = 1024
     NUM_WARPS = 4
     seed = 0
     data_generator = getattr(torch, test_data_fn)
@@ -542,12 +560,8 @@ def test_aot_jit_add(dtype, test_data_fn):
 
     test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
 
-    # Set up aot kernel directory
-    test_dir = Path("aot_compilation").absolute()
-    check_dir(test_dir)
-
     with MonkeyPatch.context() as mp:
-        mp.setenv("TRITON_AOT_KERNEL_DIR", str(test_dir))
+        mp.setenv("TRITON_AOT_KERNEL_DIR", str(aot_kernel_dir))
         print("TRITON_AOT_KERNEL_DIR: ", os.environ["TRITON_AOT_KERNEL_DIR"])
         from triton.runtime.jit import JITFunction
 
@@ -555,7 +569,7 @@ def test_aot_jit_add(dtype, test_data_fn):
         output = torch.empty_like(x)
         grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
         # Run aot jit
-        _, kernel_path = test_fn[grid](
+        compilation_artifact = test_fn[grid](
             x,
             y,
             output,
@@ -566,6 +580,15 @@ def test_aot_jit_add(dtype, test_data_fn):
         )
     # DUMP MLIR_IR
     # Compilation pipeline: PTX and CUBIN generation
+    kernel_binary = compilation_artifact.bin
+    kernel_path = compilation_artifact.kernel_path
+
+    assert os.path.exists(kernel_path)
+    compilation_srcs = glob.glob(os.path.join(kernel_path, "*.c"))
+    compilation_headers = glob.glob(os.path.join(kernel_path, "*.h"))
+
+    assert len(compilation_srcs) == 2
+    assert len(compilation_headers) == 2
 
     tt_type = ty_to_TT(x)
     dtype_in = dtype_out = TT_to_C(tt_type)
@@ -605,9 +628,6 @@ def test_aot_jit_add(dtype, test_data_fn):
     actual = actual.reshape((N,)).view(normalize_dtype_to_np(dtype))
 
     assert np.allclose(actual, expected)
-
-    # Clean up
-    # shutil.rmtree(test_dir)
 
 
 # def _test_compile_link_add():

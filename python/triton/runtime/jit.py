@@ -25,15 +25,6 @@ from typing import (
 from .._C.libtriton.triton import TMAInfos
 from ..common.backend import get_backend, get_cuda_version_key
 from .interpreter import InterpretedFunction
-from triton.debugging import logger
-from triton.debugging.debugging import TRITON_AOT_KERNEL_DIR
-from triton.tools.jitted_aot import (
-    CompiledArtifact,
-    Grid,
-    JITCompileArgs,
-    create_AOT_artifacts,
-    link_aot_artifacts,
-)
 
 
 def get_cuda_stream(idx=None):
@@ -646,6 +637,13 @@ class JITFunction(KernelInterface[T]):
             )
 
         if compile_so:
+            from triton.tools.jitted_aot import (
+                CompiledArtifact,
+                Grid,
+                JITCompileArgs,
+                create_aot_kernel,
+            )
+
             jit_args = JITCompileArgs(
                 signature=signature,
                 device=device,
@@ -661,8 +659,8 @@ class JITFunction(KernelInterface[T]):
                 device_type=device_type,
                 grid=Grid(grid_0, grid_1, grid_2),
             )
-            kernel_path = create_AOT_artifacts()
-            link_aot_artifacts(kernel_path)
+            kernel_path = create_aot_kernel(bin=bin, jit_args=jit_args, jit_fn=self)
+
             return CompiledArtifact(bin, kernel_path)
 
         return bin
