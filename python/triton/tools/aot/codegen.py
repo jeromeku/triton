@@ -35,14 +35,24 @@ class HeaderGenerator:
     ALGO_DECL_TEMPLATE = DEFAULT_ALGO_DECL_TEMPLATE
     GLOBAL_DECL_TEMPLATE = DEFAULT_GLOBAL_DECL_TEMPLATE
 
-    @classmethod
-    def make_algo_decls(cls, name: str, metas: Sequence[KernelLinkerMeta]) -> str:
-        """Generate declarations of kernels with meta-parameter and constant values"""
-        args = cls.signature_generator.gen_signature_with_full_args(metas[-1])
-        return cls.ALGO_DECL_TEMPLATE.format(
+    def __init__(self, kernels: Dict[str, KernelLinkerMeta]) -> None:
+        self.kernels = kernels
+
+    def _make_algo_decl(self, name: str, metas: List[KernelLinkerMeta]):
+        args = self.signature_generator.gen_signature_with_full_args(metas[-1])
+        return self.ALGO_DECL_TEMPLATE.format(
             name=name,
             args=args,
         )
+
+    def make_algo_decls(self) -> str:
+        """Generate declarations of kernels with meta-parameter and constant values"""
+        algo_decls = []
+
+        for name, meta in self.kernels.items():
+            algo_decls.append(self._make_algo_decl(name, meta))
+
+        return "\n".join(algo_decls).strip()
 
     @classmethod
     def make_get_num_algos_decl(cls, meta: KernelLinkerMeta) -> str:

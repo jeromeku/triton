@@ -1,6 +1,7 @@
 import re
 from collections import defaultdict
-from typing import Sequence, Union
+from pathlib import Path
+from typing import Dict, List, Sequence, Union
 
 from dataclasses import dataclass
 
@@ -44,14 +45,16 @@ class HeaderParsingPatterns:
 
 class HeaderParser:
     def __init__(self, patterns=HeaderParsingPatterns) -> None:
-        # self.linker_directives = re.compile(
-        #     "//[\\s]*tt-linker:[\\s]*([\\w]+):(.+):(.+)"
-        # )
-        # self.kernel_name = re.compile("^([\\w]+)_([\\w]+)_([\\w]+)$")
-        # self.c_sig = re.compile("[\\s]*(\\w+)\\s(\\w+)[,]?")
-        # self.arg_suffix = re.compile("[c,d]")
         self.patterns = patterns
         self.kernels = defaultdict(list)
+
+    def parse(self, headers: List[Path | str]) -> Dict[str, List[KernelLinkerMeta]]:
+        for header in headers:
+            h_path = Path(header)
+            h_str = h_path.read_text()
+            self.extract_linker_meta(h_str)
+
+        return self.kernels
 
     def extract_linker_meta(self, header: str):
         for ln in header.splitlines():
