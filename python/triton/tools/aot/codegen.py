@@ -54,18 +54,19 @@ class HeaderGenerator:
 
         return "\n".join(algo_decls).strip()
 
-    @classmethod
-    def make_get_num_algos_decl(cls, meta: KernelLinkerMeta) -> str:
+    def make_get_num_algos_decl(self) -> str:
+        meta_lists = [meta for name, meta in self.kernels.items()]
+        meta = meta_lists[0][0]
+
         src = f"int {meta.orig_kernel_name}_get_num_algos(void);"
         return src
 
-    @classmethod
-    def make_global_decl(cls, meta: KernelLinkerMeta) -> str:
+    def make_global_decl(self, meta: KernelLinkerMeta) -> str:
         """Generate declarations of kernels with meta-parameter and constant values"""
-        return cls.GLOBAL_DECL_TEMPLATE.format(
+        return self.GLOBAL_DECL_TEMPLATE.format(
             orig_kernel_name=meta.orig_kernel_name,
-            default_args=cls.signature_generator.gen_signature_with_full_args(meta),
-            full_args=cls.signature_generator.gen_signature_with_full_args(meta),
+            default_args=self.signature_generator.gen_signature_with_full_args(meta),
+            full_args=self.signature_generator.gen_signature_with_full_args(meta),
         )
 
 

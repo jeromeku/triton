@@ -100,7 +100,7 @@ void unload_add_kernel_1024_warps4xstages3();
 
 
 @pytest.fixture
-def reference_header_get_num_algo_decl():
+def reference_get_num_algo_decl():
     src = """
 int add_kernel_get_num_algos(void);
 """
@@ -175,17 +175,27 @@ def parsed_kernel_metas(headers):
     return kernels
 
 
-def test_aot_linker_algo_decl_codegen(
+def test_aot_linker_algo_decl(
     parsed_kernel_metas: Dict[str, List[KernelLinkerMeta]], reference_algo_decl
 ):
     from triton.tools.aot import HeaderGenerator
 
     header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
     actual_decl = header_gen.make_algo_decls()
+    check_codegen(actual_decl, reference_algo_decl)
+
+
+def test_aot_linker_algo_get_num_algo_decl(
+    parsed_kernel_metas: Dict[str, List[KernelLinkerMeta]], reference_get_num_algo_decl
+):
+    from triton.tools.aot import HeaderGenerator
+
+    header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
+    actual_decl = header_gen.make_get_num_algos_decl()
     print("actual_decl:\n", actual_decl)
     print("\n")
-    print("reference_header_kernel_decl:\n", reference_algo_decl)
-    check_codegen(actual_decl, reference_algo_decl)
+    print("reference_header_kernel_decl:\n", reference_get_num_algo_decl)
+    check_codegen(actual_decl, reference_get_num_algo_decl)
 
 
 def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
