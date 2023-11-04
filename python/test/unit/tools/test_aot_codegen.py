@@ -25,33 +25,22 @@ def test_aot_header_parser(headers):
     # TODO: Add more tests
 
 
-def test_aot_linker_algo_decl(
-    parsed_kernel_metas: Dict[str, List[KernelLinkerMeta]], reference_algo_decl
-):
-    from triton.tools.aot import HeaderGenerator
-
-    header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
-    actual_decl = header_gen.make_algo_decls()
+def test_aot_linker_algo_decl(header_generator: HeaderGenerator, reference_algo_decl):
+    actual_decl = header_generator.make_algo_decls()
     check_codegen(actual_decl, reference_algo_decl)
 
 
 def test_aot_linker_algo_get_num_algo_decl(
-    parsed_kernel_metas: Dict[str, List[KernelLinkerMeta]], reference_get_num_algo_decl
+    header_generator: HeaderGenerator, reference_get_num_algo_decl
 ):
-    from triton.tools.aot import HeaderGenerator
-
-    header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
-    actual_decl = header_gen.make_get_num_algos_decl()
+    actual_decl = header_generator.make_get_num_algos_decl()
     check_codegen(actual_decl, reference_get_num_algo_decl)
 
 
 def test_aot_linker_global_decl(
-    parsed_kernel_metas: Dict[str, List[KernelLinkerMeta]], reference_global_decl
+    header_generator: HeaderGenerator, reference_global_decl
 ):
-    from triton.tools.aot import HeaderGenerator
-
-    header_gen = HeaderGenerator(kernels=parsed_kernel_metas)
-    actual_decl = header_gen.make_global_decl()
+    actual_decl = header_generator.make_global_decl()
     check_codegen(actual_decl, reference_global_decl)
 
 
