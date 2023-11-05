@@ -102,7 +102,9 @@ def test_aot_compiler_params(dtype, test_data_fn):
     ids=lambda x: str(x),
 )
 @pytest.mark.parametrize("test_data_fn", ["ones"])
-def test_aot_compiler_codegen(dtype, test_data_fn):
+def test_aot_compiler_codegen(
+    dtype, test_data_fn, reference_compiler_header, reference_compiler_source
+):
     from triton.tools.aot import AOT_C_CUDA_Compiler
 
     if test_data_fn == "randn" and "int" in str(dtype):
@@ -145,6 +147,12 @@ def test_aot_compiler_codegen(dtype, test_data_fn):
         jit_args=compilation_artifact.jit_args,
         jit_fn=test_fn,
     )
+
+    header = compiler.generate_source()
+    check_codegen(header, reference_compiler_header)
+
+    # source = compiler.generate_source()
+    # check_codegen(source, reference_compiler_source)
 
 
 def test_aot_compiler_codegen(reference_compiler_params):

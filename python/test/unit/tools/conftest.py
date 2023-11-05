@@ -94,6 +94,23 @@ def parsed_kernel_metas(headers):
 
 # --- Reference codegen fixtures ---#
 
+
+@pytest.fixture
+def reference_compiler_header(headers, fixture_path: Path):
+    if "add_kernel" in any(str(h) for h in headers):
+        return (fixture_path / "add_kernel.8d4b99fa_0d1d2d3de.h").read_text().strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
+@pytest.fixture
+def reference_compiler_source(headers, fixture_path: Path):
+    if "add_kernel" in any(str(h) for h in headers):
+        return (fixture_path / "add_kernel.8d4b99fa_0d1d2d3de.c").read_text().strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
 REFERENCE_ADD_KERNEL_ALGO_DECL = """
 CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
 void load_add_kernel_1024_warps4xstages3();
