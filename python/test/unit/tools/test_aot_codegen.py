@@ -44,6 +44,13 @@ def test_aot_linker_global_decl(
     check_codegen(actual_decl, reference_global_decl)
 
 
+def test_aot_linker_header_codegen(header_generator: HeaderGenerator, reference_header):
+    actual_header = header_generator.generate()
+    print(f"actual:\n{actual_header}")
+    print(f"reference:\n{reference_header}")
+    check_codegen(actual_header, reference_header)
+
+
 def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
     from triton.tools.aot import link
 

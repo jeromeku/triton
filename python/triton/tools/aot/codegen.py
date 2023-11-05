@@ -29,11 +29,14 @@ void load_{orig_kernel_name}();
 void unload_{orig_kernel_name}();
 """
 
+DEFAULT_HEADER_INCLUDES = ["#include <cuda.h>"]
+
 
 class HeaderGenerator:
     signature_generator = SignatureGenerator
     ALGO_DECL_TEMPLATE = DEFAULT_ALGO_DECL_TEMPLATE
     GLOBAL_DECL_TEMPLATE = DEFAULT_GLOBAL_DECL_TEMPLATE
+    HEADER_INCLUDES = DEFAULT_HEADER_INCLUDES
 
     def __init__(self, kernels: Dict[str, KernelLinkerMeta]) -> None:
         self.kernels = kernels
@@ -54,7 +57,7 @@ class HeaderGenerator:
         for name, meta in self.kernels.items():
             algo_decls.append(self._make_algo_decl(name, meta))
 
-        return "\n".join(algo_decls).strip()
+        return "\n".join(algo_decls).lstrip()
 
     def make_get_num_algos_decl(self, meta: Optional[KernelLinkerMeta] = None) -> str:
         meta = meta or self.meta
@@ -69,6 +72,21 @@ class HeaderGenerator:
             default_args=self.signature_generator.gen_signature_with_full_args(meta),
             full_args=self.signature_generator.gen_signature_with_full_args(meta),
         )
+
+    def generate(self):
+        includes = "\n".join(self.HEADER_INCLUDES)
+
+        algo_decls = self.make_algo_decls()
+        get_num_algos_decl = self.make_get_num_algos_decl()
+        global_decl = self.make_global_decl()
+        src = "\n".join(
+            [
+                algo_decls,
+                get_num_algos_decl,
+                global_decl,
+            ]
+        )
+        return "\n\n".join([includes, src])
 
 
 DEFAULT_SOURCE_INCLUDES = [
