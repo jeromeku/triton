@@ -232,6 +232,8 @@ class AOTParams(_DataClassDict):
 
 
 class AOTCompilerParamsBuilder:
+    COMPILER_SPEC_KEYS = ""
+
     def __init__(
         self,
         kernel_name,
