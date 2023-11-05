@@ -1,23 +1,77 @@
-import binascii
-import glob
-import hashlib
-import os
-import subprocess
-import sys
 from collections import namedtuple
-from pathlib import Path
-from typing import Any, Dict, List
 
-from dataclasses import dataclass
+from .codegen import AOT_C_CUDA_ParamsBuilder, AOTCompilerParamsBuilder, JITCompileArgs
+from triton.compiler.compiler import CompiledKernel
+from triton.runtime.jit import JITFunction
 
 InstanceDescriptor = namedtuple(
     "instance_descriptor",
     ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
 )
 
+from abc import ABC, abstractmethod
 
-class AOTCompiler:
-    pass
+
+class AOT_Compiler(ABC):
+    @abstractmethod
+    def build_params(self):
+        ...
+
+    @abstractmethod
+    def generate_header(self):
+        ...
+
+    @abstractmethod
+    def generate_source(self):
+        ...
+
+
+class AOT_C_CUDA_Compiler(AOT_Compiler):
+    """Creates C CUDA library for accessing Triton jitted kernels"""
+
+    def __init__(
+        self,
+        kernel_name,
+        compiled_binary: CompiledKernel,
+        jit_args: JITCompileArgs,
+        jit_fn: JITFunction,
+        params_builder_cls: AOTCompilerParamsBuilder = AOT_C_CUDA_ParamsBuilder,
+    ):
+        self.kernel_name = kernel_name
+        self.compiled_binary = compiled_binary
+        self.jit_args = jit_args
+        self.params_builder = params_builder_cls(
+            kernel_name=kernel_name,
+            compiled_binary=compiled_binary,
+            jit_args=jit_args,
+            jit_fn=jit_fn,
+        )
+        self.params = self.build_params()
+
+    def build_params(self):
+        return self.params_builder.build()
+
+    def generate_header(self):
+        # Filter params for header keys
+        header_params = {
+            k: v
+            for k, v in self.params.items()
+            if k in self.params_builder.HEADER_TEMPLATE.PARAMS
+        }
+        # Generate header
+        header = self.params_builder.HEADER_TEMPLATE.TEMPLATE.format(**header_params)
+        return header
+
+    def generate_source(self):
+        # Filter params for source keys
+        source_params = {
+            k: v
+            for k, v in self.params.items()
+            if k in self.params_builder.SOURCE_TEMPLATE.PARAMS
+        }
+        # Generate source
+        source = self.params_builder.SOURCE_TEMPLATE.TEMPLATE.format(**source_params)
+        return source
 
 
 # def create_aot_kernel(
