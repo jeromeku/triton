@@ -253,14 +253,14 @@ class AOTCompiler:
         m.update(" ".join(sig).encode())
         return m.hexdigest()[:8]
 
-    def generate_signatures(self):
+    def _generate_signatures(self):
         meta_sig = f"warps{self.jit_args.num_warps}xstages{self.jit_args.num_stages}"
         signature_str = [str(s) for s in self.jit_args.signature.values()]
         sig_hash = self._hash_signature(signature_str + [meta_sig])
         const_sig = "x".join([str(v) for v in self.jit_args.constants.values()])
         return AOTSignatureArgs(meta_sig, signature_str, sig_hash, const_sig)
 
-    def generate_docstring(self):
+    def _generate_docstring(self):
         doc_string = [
             f"{self.jit_fn.arg_names[i]}={self.jit_args.constants[i]}"
             for i in self.jit_args.constants.keys()
@@ -271,7 +271,7 @@ class AOTCompiler:
         ]
         return doc_string
 
-    def generate_args(self):
+    def _generate_args(self):
         arg_names = []
         arg_types = []
 
@@ -282,12 +282,12 @@ class AOTCompiler:
                 arg_types += [self.jit_args.signature[i]]
         return AOTArgs(arg_names, arg_types)
 
-    def generate_arg_params(self, args: AOTArgs):
+    def _generate_arg_params(self, args: AOTArgs):
         arg_pointers = ", ".join([f"&{arg}" for arg in args.arg_names])
         num_args = len(args.arg_names)
         return AOTArgParams(arg_pointers, num_args)
 
-    def generate_function_name_params(self, sig_hash: str) -> AOTFunctionNameParams:
+    def _generate_function_name_params(self, sig_hash: str) -> AOTFunctionNameParams:
         config = self.jit_args.configs[0]
         suffix = kernel_suffix(self.jit_args.signature.values(), config)
         func_name = "_".join([self.kernel_name, sig_hash, suffix])
@@ -296,12 +296,12 @@ class AOTCompiler:
             kernel_name=func_name, triton_kernel_name=triton_kernel_name
         )
 
-    def generate_cubin_params(self):
+    def _generate_cubin_params(self):
         hex_ = str(binascii.hexlify(self.compiled_binary.asm["cubin"]))[2:-1]
         bin_data = ", ".join([f"0x{x}{y}" for x, y in zip(hex_[::2], hex_[1::2])])
         return AOTCubinParams(bin_size=len(hex_), bin_data=bin_data)
 
-    def generate_signature_params(
+    def _generate_signature_params(
         self, args: AOTArgs, signatures: AOTSignatureArgs
     ) -> AOTSignatureParams:
         signature = ", ".join(
@@ -321,13 +321,13 @@ class AOTCompiler:
 
         return AOTSignatureParams(signature, full_signature, algo_info)
 
-    def generate_grid_params(self):
+    def _generate_grid_params(self):
         grid_params = AOTGridParams(
             self.jit_args.grid.x, self.jit_args.grid.y, self.jit_args.grid.z
         )
         return grid_params
 
-    def build_full_params(
+    def _build_full_params(
         self,
         function_name_params,  # kernel_name, triton_kernel_name
         cubin_params,  # bin_size, bin_data
@@ -353,25 +353,25 @@ class AOTCompiler:
         return params.build()
 
     def generate_full_params(self, **kwargs):
-        signatures = self.generate_signatures()
-        args = self.generate_args()
+        signatures = self._generate_signatures()
+        args = self._generate_args()
 
-        arg_params = self.generate_arg_params(args)
-        function_name_params = self.generate_function_name_params(
+        arg_params = self._generate_arg_params(args)
+        function_name_params = self._generate_function_name_params(
             sig_hash=signatures.sig_hash
         )
-        cubin_params = self.generate_cubin_params()
-        signature_params = self.generate_signature_params(args, signatures)
-        grid_params = self.generate_grid_params()
+        cubin_params = self._generate_cubin_params()
+        signature_params = self._generate_signature_params(args, signatures)
+        grid_params = self._generate_grid_params()
 
         # remaining params
-        kernel_docstring = self.generate_docstring()
+        kernel_docstring = self._generate_docstring()
         shared = self.compiled_binary.shared
         num_warps = self.jit_args.num_warps
         _placeholder = ""
 
         # build full spec
-        params = self.build_full_params(
+        params = self._build_full_params(
             function_name_params=function_name_params,
             cubin_params=cubin_params,
             signature_params=signature_params,
