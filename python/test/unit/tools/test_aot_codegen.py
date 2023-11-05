@@ -138,23 +138,23 @@ def test_aot_linker_header_codegen(header_generator: HeaderGenerator, reference_
     check_codegen(actual_header, reference_header)
 
 
-def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
-    from triton.tools.aot import link
+# def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
+#     from triton.tools.aot import Linker
 
-    out_path = linker_test_dir / "kernel"
-    linker = link.Linker(headers, out_path=out_path.absolute())
-    kernels = linker.parse_headers()
-    header_file, meta = linker.generate_headers(kernels)
+#     out_path = linker_test_dir / "kernel"
+#     linker = Linker(headers, out_path=out_path.absolute())
+#     kernels = linker.parse_headers()
+#     header_file, meta = linker.generate_headers(kernels)
 
-    assert os.path.exists(header_file)
+#     assert os.path.exists(header_file)
 
-    with open(header_file, "r") as f:
-        actual_lines = [line.strip() for line in f]
+#     with open(header_file, "r") as f:
+#         actual_lines = [line.strip() for line in f]
 
-    expected_lines = [line.strip() for line in reference_header.split("\n")]
+#     expected_lines = [line.strip() for line in reference_header.split("\n")]
 
-    for expected, actual in zip(expected_lines, actual_lines):
-        assert expected == actual
+#     for expected, actual in zip(expected_lines, actual_lines):
+#         assert expected == actual
 
 
 def test_aot_linker_func_pointer_defs(
@@ -207,6 +207,8 @@ def test_aot_linker_source_codegen(source_generator: SourceGenerator, reference_
 
 
 def test_aot_linker_codegen(headers, reference_header, reference_source):
+    from triton.tools.aot import Linker
+
     linker = Linker(headers)
     result = linker.generate()
     check_codegen(result.header, reference_header)
