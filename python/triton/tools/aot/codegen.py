@@ -71,14 +71,16 @@ class HeaderGenerator:
         )
 
 
+DEFAULT_SOURCE_INCLUDES = [
+    "#include <cuda.h>",
+    "#include <stdint.h>",
+    "#include <assert.h>",
+]
+
+
 class SourceGenerator:
     signature_generator = SignatureGenerator
-    KERNEL_HINTS_DISPATCHER_TEMPLATE = ""
-    FUNCTION_POINTERS_DEFINITION_TEMPLATE = ""
-    KERNEL_CONST_DEFINITION_DISPATCHER_TEMPLATE = ""
-    KERNEL_LOAD_DEFINITION_TEMPLATE = ""
-    NUM_ALGOS_DEFINITION_TEMPLATE = ""
-    DEFAULT_ALGO_DEFINITION_TEMPLATE = ""
+    SOURCE_INCLUDES = DEFAULT_SOURCE_INCLUDES
 
     def __init__(
         self,
@@ -209,6 +211,27 @@ class SourceGenerator:
         src += f"  return {meta.orig_kernel_name}(stream, {', '.join(meta.arg_names)}, 0);\n"
         src += "}\n"
         return src
+
+    def generate(self):
+        includes = "\n".join(self.SOURCE_INCLUDES)
+
+        defs = self.make_defs()
+        func_pointers_def = self.make_func_pointers()
+        meta_const_def = self.make_kernel_meta_const_dispatcher()
+        get_num_algos_def = self.make_get_num_algos_def()
+        load_unload_def = self.make_kernel_load_defs()
+        default_algo_kernel = self.make_default_algo_kernel_def()
+        src = "\n".join(
+            [
+                defs,
+                func_pointers_def,
+                get_num_algos_def,
+                meta_const_def,
+                load_unload_def,
+                default_algo_kernel,
+            ]
+        )
+        return "\n\n".join([includes, src])
 
 
 # DEFAULT_ALGO_KERNEL_TEMPLATE = """

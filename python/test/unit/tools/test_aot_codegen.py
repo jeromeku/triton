@@ -107,3 +107,10 @@ def test_aot_linker_default_algo_def(
 ):
     actual_def = source_generator.make_default_algo_kernel_def()
     check_codegen(actual_def, reference_default_algo_def)
+
+
+def test_aot_linker_source_codegen(source_generator: SourceGenerator, reference_source):
+    actual_source = source_generator.generate()
+    print(f"actual:\n{actual_source}")
+    print(f"reference:\n{reference_source}")
+    check_codegen(actual_source, reference_source)
