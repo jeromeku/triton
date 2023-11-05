@@ -6,12 +6,7 @@ import pytest
 import torch
 
 import triton
-from triton.tools.aot import (
-    AOTCompilerParamsBuilder,
-    HeaderGenerator,
-    Linker,
-    SourceGenerator,
-)
+from triton.tools.aot import AOTCompilerParamsBuilder, HeaderGenerator, SourceGenerator
 from triton.tools.jitted_aot import CompiledArtifact
 
 
