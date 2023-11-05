@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 from pathlib import Path
@@ -53,11 +54,33 @@ def linker_test_dir():
 
 
 @pytest.fixture(params=["add_kernel"])
-def headers(request):
-    headers_path = (
-        Path(__file__).parent / "fixtures" / "codegen" / request.param
-    ).absolute()
-    return list(headers_path.glob("*.h"))
+def fixture_path(request):
+    return (Path(__file__).parent / "fixtures" / "codegen" / request.param).absolute()
+
+
+@pytest.fixture
+def header_generator(parsed_kernel_metas):
+    from triton.tools.aot import HeaderGenerator
+
+    return HeaderGenerator(kernels=parsed_kernel_metas)
+
+
+@pytest.fixture
+def source_generator(parsed_kernel_metas):
+    from triton.tools.aot import SourceGenerator
+
+    return SourceGenerator(kernels=parsed_kernel_metas)
+
+
+@pytest.fixture
+def reference_compiler_params(fixture_path):
+    with open(fixture_path / "compiler_params.json", "r") as fp:
+        return json.load(fp)
+
+
+@pytest.fixture
+def headers(fixture_path):
+    return list(fixture_path.glob("*.h"))
 
 
 @pytest.fixture
@@ -68,6 +91,8 @@ def parsed_kernel_metas(headers):
     kernels = parser.parse(headers)
     return kernels
 
+
+# --- Reference codegen fixtures ---#
 
 REFERENCE_ADD_KERNEL_ALGO_DECL = """
 CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
@@ -313,17 +338,3 @@ def reference_source(headers):
         return REFERENCE_ADD_KERNEL_SOURCE.strip()
     else:
         raise ValueError(f"Unknown header: {list(headers)}")
-
-
-@pytest.fixture
-def header_generator(parsed_kernel_metas):
-    from triton.tools.aot import HeaderGenerator
-
-    return HeaderGenerator(kernels=parsed_kernel_metas)
-
-
-@pytest.fixture
-def source_generator(parsed_kernel_metas):
-    from triton.tools.aot import SourceGenerator
-
-    return SourceGenerator(kernels=parsed_kernel_metas)

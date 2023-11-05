@@ -37,7 +37,7 @@ def check_dir(dir):
     ids=lambda x: str(x),
 )
 @pytest.mark.parametrize("test_data_fn", ["ones"])
-def test_aot_add_kernel_compiler_params(dtype, test_data_fn):
+def test_aot_compiler_params(dtype, test_data_fn):
     if test_data_fn == "randn" and "int" in str(dtype):
         pytest.skip("randn not supported for int types")
     # Test params
@@ -99,6 +99,10 @@ def test_aot_add_kernel_compiler_params(dtype, test_data_fn):
         assert (
             expected_spec[k] == actual_spec[k]
         ), f"Key: {k}\nExpected: {expected_spec[k]}\nActual: {actual_spec[k]}"
+
+
+def test_aot_compiler_codegen(reference_compiler_params):
+    print(reference_compiler_params)
 
 
 def test_aot_compiler_params():
