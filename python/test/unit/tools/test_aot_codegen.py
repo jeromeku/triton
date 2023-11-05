@@ -1,7 +1,5 @@
 import os
-from typing import Dict, List
 
-from triton.tools.aot import KernelLinkerMeta
 from triton.tools.aot.codegen import HeaderGenerator, SourceGenerator
 
 
