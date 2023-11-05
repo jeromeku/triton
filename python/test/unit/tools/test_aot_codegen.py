@@ -151,8 +151,8 @@ def test_aot_compiler_codegen(
     header = compiler.generate_source()
     check_codegen(header, reference_compiler_header)
 
-    # source = compiler.generate_source()
-    # check_codegen(source, reference_compiler_source)
+    source = compiler.generate_source()
+    check_codegen(source, reference_compiler_source)
 
 
 def test_aot_compiler_codegen(reference_compiler_params):
