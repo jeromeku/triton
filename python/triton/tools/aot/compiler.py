@@ -231,7 +231,7 @@ class AOTParams(_DataClassDict):
         return params
 
 
-class AOTCompiler:
+class AOTCompilerParamsBuilder:
     def __init__(
         self,
         kernel_name,
@@ -352,7 +352,7 @@ class AOTCompiler:
         )
         return params.build()
 
-    def generate_full_params(self, **kwargs):
+    def build(self, **kwargs):
         signatures = self._generate_signatures()
         args = self._generate_args()
 
@@ -385,6 +385,10 @@ class AOTCompiler:
         if kwargs:
             params.update(kwargs)
         return params
+
+
+class AOTCompiler:
+    pass
 
 
 def create_aot_kernel(

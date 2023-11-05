@@ -6,7 +6,12 @@ import pytest
 import torch
 
 import triton
-from triton.tools.aot import AOTCompiler, HeaderGenerator, Linker, SourceGenerator
+from triton.tools.aot import (
+    AOTCompilerParamsBuilder,
+    HeaderGenerator,
+    Linker,
+    SourceGenerator,
+)
 from triton.tools.jitted_aot import CompiledArtifact
 
 
@@ -75,13 +80,13 @@ def test_aot_add_kernel_compiler_params(dtype, test_data_fn):
     )
 
     expected_spec = compilation_artifact.compiler_spec
-    compiler = AOTCompiler(
+    compiler = AOTCompilerParamsBuilder(
         kernel_name,
         compiled_binary=compilation_artifact.compiled_binary,
         jit_args=compilation_artifact.jit_args,
         jit_fn=test_fn,
     )
-    actual_spec = compiler.generate_full_params()
+    actual_spec = compiler.build()
 
     with open(test_dir / "expected_spec.json", "w") as f:
         json.dump(expected_spec, f)
