@@ -115,28 +115,26 @@ def test_aot_header_parser(headers):
 
 
 def test_aot_linker_algo_decl(header_generator: HeaderGenerator, reference_algo_decl):
-    actual_decl = header_generator.make_algo_decls()
+    actual_decl = header_generator._make_algo_decls()
     check_codegen(actual_decl, reference_algo_decl)
 
 
 def test_aot_linker_algo_get_num_algo_decl(
     header_generator: HeaderGenerator, reference_get_num_algo_decl
 ):
-    actual_decl = header_generator.make_get_num_algos_decl()
+    actual_decl = header_generator._make_get_num_algos_decl()
     check_codegen(actual_decl, reference_get_num_algo_decl)
 
 
 def test_aot_linker_global_decl(
     header_generator: HeaderGenerator, reference_global_decl
 ):
-    actual_decl = header_generator.make_global_decl()
+    actual_decl = header_generator._make_global_decl()
     check_codegen(actual_decl, reference_global_decl)
 
 
 def test_aot_linker_header_codegen(header_generator: HeaderGenerator, reference_header):
     actual_header = header_generator.generate()
-    print(f"actual:\n{actual_header}")
-    print(f"reference:\n{reference_header}")
     check_codegen(actual_header, reference_header)
 
 
