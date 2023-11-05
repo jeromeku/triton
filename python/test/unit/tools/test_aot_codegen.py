@@ -162,9 +162,7 @@ def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
 def test_aot_linker_func_pointer_defs(
     source_generator: SourceGenerator, reference_func_pointer_defs
 ):
-    defs = source_generator.make_func_pointers()
-    print(f"defs:\n{defs}")
-    print(f"reference:\n{reference_func_pointer_defs}")
+    defs = source_generator._make_func_pointers()
     check_codegen(actual=defs, expected=reference_func_pointer_defs)
 
 
@@ -172,36 +170,34 @@ def test_aot_linker_const_dispatcher_defs(
     source_generator: SourceGenerator,
     reference_const_dispatcher_defs,
 ):
-    defs = source_generator.make_kernel_meta_const_dispatcher()
-    print(f"defs:\n{defs}")
-    print(f"reference:\n{reference_const_dispatcher_defs}")
+    defs = source_generator._make_kernel_meta_const_dispatcher()
     check_codegen(actual=defs, expected=reference_const_dispatcher_defs)
 
 
 def test_aot_linker_source_gen_dispatcher_defs(
     source_generator: SourceGenerator, reference_dispatcher_defs
 ):
-    defs = source_generator.make_defs()
+    defs = source_generator._make_defs()
 
     check_codegen(actual=defs, expected=reference_dispatcher_defs)
 
 
 def test_aot_linker_load_defs(source_generator: SourceGenerator, reference_load_defs):
-    actual_defs = source_generator.make_kernel_load_defs()
+    actual_defs = source_generator._make_kernel_load_defs()
     check_codegen(actual_defs, reference_load_defs)
 
 
 def test_aot_linker_get_num_algos_def(
     source_generator: SourceGenerator, reference_get_num_algos_def
 ):
-    actual_defs = source_generator.make_get_num_algos_def()
+    actual_defs = source_generator._make_get_num_algos_def()
     check_codegen(actual_defs, reference_get_num_algos_def)
 
 
 def test_aot_linker_default_algo_def(
     source_generator: SourceGenerator, reference_default_algo_def
 ):
-    actual_def = source_generator.make_default_algo_kernel_def()
+    actual_def = source_generator._make_default_algo_kernel_def()
     check_codegen(actual_def, reference_default_algo_def)
 
 

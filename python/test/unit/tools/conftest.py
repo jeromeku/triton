@@ -317,13 +317,13 @@ def reference_source(headers):
 
 @pytest.fixture
 def header_generator(parsed_kernel_metas):
-    from triton.tools.aot.codegen import HeaderGenerator
+    from triton.tools.aot import HeaderGenerator
 
     return HeaderGenerator(kernels=parsed_kernel_metas)
 
 
 @pytest.fixture
 def source_generator(parsed_kernel_metas):
-    from triton.tools.aot.codegen import SourceGenerator
+    from triton.tools.aot import SourceGenerator
 
     return SourceGenerator(kernels=parsed_kernel_metas)
