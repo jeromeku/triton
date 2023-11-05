@@ -476,8 +476,8 @@ class JITFunction(KernelInterface[T]):
         warmup = get_special_arg("warmup", False)
         device = get_special_arg("device")
         device_type = get_special_arg("device_type")
-        compile_so = get_special_arg("compile_so", False)
-
+        trace = get_special_arg("trace", False)
+        trace_dir = get_special_arg("trace_dir", None)
         # Bind the remaining arguments to `fn`.
         bound_args = self.signature.bind(*args, **kwargs)
         bound_args.apply_defaults()
@@ -636,7 +636,7 @@ class JITFunction(KernelInterface[T]):
                 *bin.assemble_tensormap_to_arg(non_constexpr_arg_values),
             )
 
-        if compile_so:
+        if trace:
             from triton.tools.jitted_aot import (
                 CompiledArtifact,
                 Grid,
@@ -659,9 +659,16 @@ class JITFunction(KernelInterface[T]):
                 device_type=device_type,
                 grid=Grid(grid_0, grid_1, grid_2),
             )
-            kernel_path = create_aot_kernel(bin=bin, jit_args=jit_args, jit_fn=self)
+            kernel_path, compiler_spec = create_aot_kernel(
+                bin=bin, jit_args=jit_args, jit_fn=self, trace_dir=trace_dir
+            )
 
-            return CompiledArtifact(bin, kernel_path)
+            return CompiledArtifact(
+                compiled_binary=bin,
+                kernel_path=kernel_path,
+                compiler_spec=compiler_spec,
+                jit_args=jit_args,
+            )
 
         return bin
 

@@ -24,12 +24,6 @@ InstanceDescriptor = namedtuple(
 
 
 @dataclass
-class CompiledArtifact:
-    bin: CompiledKernel
-    kernel_path: str
-
-
-@dataclass
 class Grid:
     x: int
     y: int
@@ -59,6 +53,14 @@ class JITCompileArgs(dict):
         self.update(self.__dict__)
 
 
+@dataclass
+class CompiledArtifact:
+    compiled_binary: CompiledKernel
+    kernel_path: str
+    compiler_spec: dict
+    jit_args: JITCompileArgs
+
+
 def hash_signature(signature: List[str]):
     m = hashlib.sha256()
     m.update(" ".join(signature).encode())
@@ -66,7 +68,7 @@ def hash_signature(signature: List[str]):
 
 
 def create_aot_kernel(
-    bin: CompiledKernel, jit_fn: JITFunction, jit_args: JITCompileArgs
+    bin: CompiledKernel, jit_fn: JITFunction, jit_args: JITCompileArgs, trace_dir=None
 ):
     kernel_name = jit_fn.__name__
     ## Create AOT artifacts
@@ -123,7 +125,9 @@ def create_aot_kernel(
         "_placeholder": "",
     }
 
-    kernel_dir = os.environ.get("TRITON_AOT_KERNEL_DIR", TRITON_AOT_KERNEL_DIR)
+    kernel_dir = trace_dir or os.environ.get(
+        "TRITON_AOT_KERNEL_DIR", TRITON_AOT_KERNEL_DIR
+    )
     out_dir = Path(kernel_dir) / kernel_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -134,8 +138,13 @@ def create_aot_kernel(
         with (out_dir / out_name).open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))
 
+    import json
+
+    with open(out_dir / "params.json", "w") as fp:
+        json.dump(params, fp)
+
     link_aot_kernel(out_dir, kernel_name)
-    return out_dir
+    return out_dir, params
 
 
 def link_aot_kernel(kernel_path, dispatcher_name):

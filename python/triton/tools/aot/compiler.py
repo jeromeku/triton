@@ -174,43 +174,47 @@ class AOTSignatureParams(_DataClassDict):
     algo_info: str
 
 
+@dataclass
 class AOTArgs(_DataClassDict):
     arg_names: List[str]
     arg_types: List[str]
 
 
+@dataclass
 class AOTArgParams(_DataClassDict):
     arg_pointers: str
     num_args: int
 
 
+@dataclass
 class AOTFunctionNameParams(_DataClassDict):
-    func_name: str
+    kernel_name: str
     triton_kernel_name: str
 
 
+@dataclass
 class AOTCubinParams(_DataClassDict):
     bin_size: int
     bin_data: str
 
 
+@dataclass
 class AOTGridParams(_DataClassDict):
     gridX: int
     gridY: int
     gridZ: int
 
 
+@dataclass
 class AOTParams(_DataClassDict):
     function_name_params: AOTFunctionNameParams
     cubin_params: AOTCubinParams
     signature_params: AOTSignatureParams
+    arg_params: AOTArgParams
     grid_params: AOTGridParams
     kernel_docstring: str
-    arg_pointer: str
-    num_args: int
     shared: int
     num_warps: int
-    algo_info: str
     _placeholder: str
 
     def build(self):
@@ -218,9 +222,10 @@ class AOTParams(_DataClassDict):
             **self.function_name_params,
             **self.cubin_params,
             **self.signature_params,
+            **self.arg_params,
             **self.grid_params,
         }
-        for k, v in self.__dict__:
+        for k, v in self.__dict__.items():
             if not k.endswith("_params"):
                 params.update({k: v})
         return params
@@ -243,10 +248,15 @@ class AOTCompiler:
         self.header_template = header_template
         self.source_template = source_template
 
+    def _hash_signature(self, sig: List[str]):
+        m = hashlib.sha256()
+        m.update(" ".join(sig).encode())
+        return m.hexdigest()[:8]
+
     def generate_signatures(self):
         meta_sig = f"warps{self.jit_args.num_warps}xstages{self.jit_args.num_stages}"
         signature_str = [str(s) for s in self.jit_args.signature.values()]
-        sig_hash = hash_signature(signature_str + [meta_sig])
+        sig_hash = self._hash_signature(signature_str + [meta_sig])
         const_sig = "x".join([str(v) for v in self.jit_args.constants.values()])
         return AOTSignatureArgs(meta_sig, signature_str, sig_hash, const_sig)
 
@@ -283,7 +293,7 @@ class AOTCompiler:
         func_name = "_".join([self.kernel_name, sig_hash, suffix])
         triton_kernel_name = "_".join([self.kernel_name, suffix])
         return AOTFunctionNameParams(
-            func_name=func_name, triton_kernel_name=triton_kernel_name
+            kernel_name=func_name, triton_kernel_name=triton_kernel_name
         )
 
     def generate_cubin_params(self):
@@ -294,23 +304,20 @@ class AOTCompiler:
     def generate_signature_params(
         self, args: AOTArgs, signatures: AOTSignatureArgs
     ) -> AOTSignatureParams:
-        signature = (
-            ", ".join(
-                [
-                    f"{ty_to_cpp(ty)} {name}"
-                    for name, ty in zip(args.arg_names, args.arg_types)
-                ]
-            ),
+        signature = ", ".join(
+            [
+                f"{ty_to_cpp(ty)} {name}"
+                for name, ty in zip(args.arg_names, args.arg_types)
+            ]
         )
-        full_signature = (
-            ", ".join(
-                [
-                    f"{ty_to_cpp(self.jit_args.signature[i])} {self.jit_fn.arg_names[i]}"
-                    for i in self.jit_args.signature.keys()
-                ]
-            ),
+
+        full_signature = ", ".join(
+            [
+                f"{ty_to_cpp(self.jit_args.signature[i])} {self.jit_fn.arg_names[i]}"
+                for i in self.jit_args.signature.keys()
+            ]
         )
-        algo_info = ("_".join([signatures.const_sig, signatures.meta_sig]),)
+        algo_info = "_".join([signatures.const_sig, signatures.meta_sig])
 
         return AOTSignatureParams(signature, full_signature, algo_info)
 
@@ -322,40 +329,62 @@ class AOTCompiler:
 
     def build_full_params(
         self,
-        args,
-        signatures,
-        function_name_params,
-        cubin_params,
-        signature_params,
-        grid_params,
-        place_holder="",
+        function_name_params,  # kernel_name, triton_kernel_name
+        cubin_params,  # bin_size, bin_data
+        signature_params,  # signature, full_signature, algo_info
+        arg_params,  # arg_pointers, num_args
+        grid_params,  # gridX, gridY, gridZ
+        kernel_docstring,
+        shared,
+        num_warps,
+        _placeholder="",
     ):
-        arg_pointers = ", ".join([f"&{arg}" for arg in args.arg_names])
-        num_args = len(args.arg_names)
-        kernel_docstring = (doc_string,)
-        shared = (self.compiled_binary.shared,)
-        num_warps = (self.jit_args.num_warps,)
+        params = AOTParams(
+            function_name_params=function_name_params,
+            cubin_params=cubin_params,
+            signature_params=signature_params,
+            arg_params=arg_params,
+            grid_params=grid_params,
+            kernel_docstring=kernel_docstring,
+            shared=shared,
+            num_warps=num_warps,
+            _placeholder=_placeholder,
+        )
+        return params.build()
 
-    def compile(self):
+    def generate_full_params(self, **kwargs):
         signatures = self.generate_signatures()
-        doc_string = self.generate_docstring()
-        args = self.generate_args(sig_hash=signatures.sig_hash)
+        args = self.generate_args()
 
         arg_params = self.generate_arg_params(args)
-        function_name_params = self.generate_name_params(sig_hash=signatures.sig_hash)
+        function_name_params = self.generate_function_name_params(
+            sig_hash=signatures.sig_hash
+        )
         cubin_params = self.generate_cubin_params()
-        signature_params = self.build_signature_params(args, signatures)
+        signature_params = self.generate_signature_params(args, signatures)
         grid_params = self.generate_grid_params()
 
+        # remaining params
+        kernel_docstring = self.generate_docstring()
+        shared = self.compiled_binary.shared
+        num_warps = self.jit_args.num_warps
+        _placeholder = ""
+
+        # build full spec
         params = self.build_full_params(
-            signatures,
-            doc_string,
-            args,
-            function_name_params,
-            cubin_params,
-            signature_params,
-            grid_params,
+            function_name_params=function_name_params,
+            cubin_params=cubin_params,
+            signature_params=signature_params,
+            arg_params=arg_params,
+            grid_params=grid_params,
+            kernel_docstring=kernel_docstring,
+            shared=shared,
+            num_warps=num_warps,
+            _placeholder=_placeholder,
         )
+        if kwargs:
+            params.update(kwargs)
+        return params
 
 
 def create_aot_kernel(
@@ -414,8 +443,8 @@ def create_aot_kernel(
         "gridX": jit_args.grid.x,  # grid_params
         "gridY": jit_args.grid.y,  # grid_params
         "gridZ": jit_args.grid.z,  # grid_params
-        "kernel_docstring": doc_string,
-        "shared": bin.shared,
+        "kernel_docstring": doc_string,  # docstring
+        "shared": bin.shared,  #
         "num_warps": jit_args.num_warps,
         "_placeholder": "",
     }

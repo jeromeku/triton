@@ -1,6 +1,13 @@
+import json
 import os
+from pathlib import Path
 
-from triton.tools.aot import HeaderGenerator, Linker, SourceGenerator
+import pytest
+import torch
+
+import triton
+from triton.tools.aot import AOTCompiler, HeaderGenerator, Linker, SourceGenerator
+from triton.tools.jitted_aot import CompiledArtifact
 
 
 def _preprocess_src(src):
@@ -12,6 +19,90 @@ def check_codegen(actual: str, expected: str):
 
     for actual, expected in zip(actual_lines, expected_lines):
         assert actual == expected, f"Expected: \n{expected}\nActual: \n{actual}"
+
+
+def check_dir(dir):
+    if os.path.exists(dir):
+        import shutil
+
+        shutil.rmtree(dir)
+
+    os.makedirs(dir)
+    return dir
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [torch.float32],
+    ids=lambda x: str(x),
+)
+@pytest.mark.parametrize("test_data_fn", ["ones"])
+def test_aot_add_kernel_compiler_params(dtype, test_data_fn):
+    if test_data_fn == "randn" and "int" in str(dtype):
+        pytest.skip("randn not supported for int types")
+    # Test params
+    N = 1024
+    BLOCK_SIZE = 1024
+    NUM_WARPS = 4
+    seed = 0
+    data_generator = getattr(torch, test_data_fn)
+
+    torch.manual_seed(seed)
+    x = data_generator(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
+    y = data_generator(N, dtype=dtype, device="cuda")
+
+    test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
+
+    # Set up aot kernel directory
+    test_dir = Path("aot_compilation_spec_test").absolute()
+    check_dir(test_dir)
+    from triton.runtime.jit import JITFunction
+
+    test_fn = JITFunction(test_kernel)
+    kernel_name = test_fn.__name__
+    output = torch.empty_like(x)
+    grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
+    # Run aot jit
+    compilation_artifact: CompiledArtifact = test_fn[grid](
+        x,
+        y,
+        output,
+        N,
+        BLOCK_SIZE=BLOCK_SIZE,
+        num_warps=NUM_WARPS,
+        trace=True,
+        trace_dir=test_dir,
+    )
+
+    expected_spec = compilation_artifact.compiler_spec
+    compiler = AOTCompiler(
+        kernel_name,
+        compiled_binary=compilation_artifact.compiled_binary,
+        jit_args=compilation_artifact.jit_args,
+        jit_fn=test_fn,
+    )
+    actual_spec = compiler.generate_full_params()
+
+    with open(test_dir / "expected_spec.json", "w") as f:
+        json.dump(expected_spec, f)
+
+    with open(test_dir / "actual_spec.json", "w") as f:
+        json.dump(actual_spec, f)
+
+    expected_keys = set(expected_spec.keys())
+    actual_keys = set(actual_spec.keys())
+    assert (
+        expected_keys == actual_keys
+    ), f"Expected: {expected_keys}\nActual: {actual_keys}"
+
+    for k in expected_keys:
+        assert (
+            expected_spec[k] == actual_spec[k]
+        ), f"Key: {k}\nExpected: {expected_spec[k]}\nActual: {actual_spec[k]}"
+
+
+def test_aot_compiler_params():
+    pass
 
 
 def test_aot_header_parser(headers):
