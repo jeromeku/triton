@@ -13,7 +13,7 @@ class AOTTemplate(dict):
         self.update(self.__dict__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class AOT_C_CUDA_Header_Template(AOTTemplate):
     TEMPLATE_NAME: str = "C CUDA Kernel Header Template"
     PARAMS = {
@@ -41,7 +41,7 @@ CUresult{_placeholder} {kernel_name}(CUstream stream, {signature});
 """
 
 
-@dataclass
+@dataclass(frozen=True)
 class AOT_C_CUDA_Source_Template(AOTTemplate):
     TEMPLATE_NAME: str = "C CUDA Kernel Source Template"
     PARAMS = {
@@ -128,3 +128,7 @@ CUresult {kernel_name}(CUstream stream, {signature}) {{
       return cuLaunchKernel({kernel_name}_func, gX, gY, gZ, {num_warps} * 32, 1, 1, {shared}, stream, args, NULL);
 }}
 """
+
+
+DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE = AOT_C_CUDA_Header_Template()
+DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE = AOT_C_CUDA_Source_Template()

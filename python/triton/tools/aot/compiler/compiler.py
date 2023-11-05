@@ -11,6 +11,11 @@ from typing import Any, Dict, List
 from dataclasses import dataclass
 
 import triton
+from .templates import (
+    DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE,
+    DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE,
+    AOTTemplate,
+)
 from triton.compiler.code_generator import kernel_suffix
 from triton.compiler.compiler import CompiledKernel
 from triton.compiler.make_launcher import ty_to_cpp
@@ -63,94 +68,6 @@ def hash_signature(signature: List[str]):
     m = hashlib.sha256()
     m.update(" ".join(signature).encode())
     return m.hexdigest()[:8]
-
-
-DEFAULT_HEADER_TEMPLATE = """
-#ifndef TT_KERNEL_INCLUDES
-#define TT_KERNEL_INCLUDES
-
-#include <cuda.h>
-#include <inttypes.h>
-#include <stdint.h>
-#include <stdio.h>
-
-#endif
-
-void unload_{kernel_name}(void);
-void load_{kernel_name}(void);
-// tt-linker: {kernel_name}:{full_signature}:{algo_info}
-CUresult{_placeholder} {kernel_name}(CUstream stream, {signature});
-"""
-
-DEFAULT_SOURCE_TEMPLATE = """
-/* clang-format off */
-#include <stdio.h>
-#include <stdint.h>
-#include <inttypes.h>
-#include <string.h>
-#include <cuda.h>
-
-
-// helpers to check for cuda errors
-#define CUDA_CHECK(ans) {{\
-    gpuAssert((ans), __FILE__, __LINE__);\
-  }}\
-
-static inline void gpuAssert(CUresult code, const char *file, int line) {{
-  if (code != CUDA_SUCCESS) {{
-    const char *prefix = "Triton Error [CUDA]: ";
-    const char *str;
-    cuGetErrorString(code, &str);
-    char err[1024] = {{0}};
-    strcat(err, prefix);
-    strcat(err, str);
-    printf("%s\\n", err);
-    exit(code);
-  }}
-}}
-
-// globals
-#define CUBIN_NAME {kernel_name}_cubin
-CUmodule {kernel_name}_mod = NULL;
-CUfunction {kernel_name}_func = NULL;
-unsigned char CUBIN_NAME[{bin_size}] = {{ {bin_data} }};
-
-
-void unload_{kernel_name}(void) {{
-    CUDA_CHECK(cuModuleUnload({kernel_name}_mod));
-}}
-
-// TODO: some code duplication with `runtime/backend/cuda.c`
-void load_{kernel_name}() {{
-    int dev = 0;
-    void *bin = (void *)&CUBIN_NAME;
-    int shared = {shared};
-    CUDA_CHECK(cuModuleLoadData(&{kernel_name}_mod, bin));
-    CUDA_CHECK(cuModuleGetFunction(&{kernel_name}_func, {kernel_name}_mod, "{triton_kernel_name}"));
-    // set dynamic shared memory if necessary
-    int shared_optin;
-    CUDA_CHECK(cuDeviceGetAttribute(&shared_optin, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, dev));
-    if (shared > 49152 && shared_optin > 49152) {{
-      CUDA_CHECK(cuFuncSetCacheConfig({kernel_name}_func, CU_FUNC_CACHE_PREFER_SHARED));
-      CUDA_CHECK(cuFuncSetAttribute({kernel_name}_func, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, shared_optin))
-    }}
-}}
-
-/*
-{kernel_docstring}
-*/
-CUresult {kernel_name}(CUstream stream, {signature}) {{
-    if ({kernel_name}_func == NULL)
-       load_{kernel_name}();
-    unsigned int gX = {gridX};
-    unsigned int gY = {gridY};
-    unsigned int gZ = {gridZ};
-    void *args[{num_args}] = {{ {arg_pointers} }};
-    // TODO: shared memory
-    if(gX * gY * gZ > 0)
-      return cuLaunchKernel({kernel_name}_func, gX, gY, gZ, {num_warps} * 32, 1, 1, {shared}, stream, args, NULL);
-}}
-"""
 
 
 @dataclass
@@ -232,7 +149,8 @@ class AOTParams(_DataClassDict):
 
 
 class AOTCompilerParamsBuilder:
-    COMPILER_SPEC_KEYS = ""
+    HEADER_TEMPLATE = DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE
+    SOURCE_TEMPLATE = DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE
 
     def __init__(
         self,
@@ -240,15 +158,11 @@ class AOTCompilerParamsBuilder:
         compiled_binary: CompiledKernel,
         jit_args: JITCompileArgs,
         jit_fn: JITFunction,
-        header_template: str | Path = DEFAULT_HEADER_TEMPLATE,
-        source_template: str | Path = DEFAULT_SOURCE_TEMPLATE,
     ):
         self.kernel_name = kernel_name
         self.compiled_binary = compiled_binary
         self.jit_args = jit_args
         self.jit_fn = jit_fn
-        self.header_template = header_template
-        self.source_template = source_template
 
     def _hash_signature(self, sig: List[str]):
         m = hashlib.sha256()
@@ -354,6 +268,21 @@ class AOTCompilerParamsBuilder:
         )
         return params.build()
 
+    def _validate(self, template, params: Dict[str, Any]):
+        """Check that all template params are present"""
+
+        missing_keys = self.template.PARAMS - set(params.keys())
+        if missing_keys:
+            raise ValueError(
+                f"Missing following expected keys in template {template.TEMPLATE_NAME}: {missing_keys}"
+            )
+
+    def _validate_header(self, params):
+        self._validate(self.HEADER_TEMPLATE, params)
+
+    def _validate_source(self, params):
+        self._validate(self.SOURCE_TEMPLATE, params)
+
     def build(self, **kwargs):
         signatures = self._generate_signatures()
         args = self._generate_args()
@@ -386,6 +315,9 @@ class AOTCompilerParamsBuilder:
         )
         if kwargs:
             params.update(kwargs)
+
+        self._validate_header(params)
+        self._validate_source(params)
         return params
 
 

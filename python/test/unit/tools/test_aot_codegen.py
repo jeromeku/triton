@@ -83,11 +83,11 @@ def test_aot_compiler_params(dtype, test_data_fn):
     )
     actual_spec = compiler.build()
 
-    with open(test_dir / "expected_spec.json", "w") as f:
-        json.dump(expected_spec, f)
+    # with open(test_dir / "expected_spec.json", "w") as f:
+    #     json.dump(expected_spec, f)
 
-    with open(test_dir / "actual_spec.json", "w") as f:
-        json.dump(actual_spec, f)
+    # with open(test_dir / "actual_spec.json", "w") as f:
+    #     json.dump(actual_spec, f)
 
     expected_keys = set(expected_spec.keys())
     actual_keys = set(actual_spec.keys())

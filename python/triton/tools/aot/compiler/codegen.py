@@ -390,7 +390,26 @@ class AOTCompilerParamsBuilder:
 
 
 class AOTCompiler:
-    pass
+    HEADER_TEMPLATE: str = DEFAULT_HEADER_TEMPLATE
+    SOURCE_TEMPLATE: str = DEFAULT_SOURCE_TEMPLATE
+
+    def __init__(
+        self,
+        kernel_name,
+        compiled_binary: CompiledKernel,
+        jit_args,
+        jit_fn,
+        params_builder_cls=AOTCompilerParamsBuilder,
+    ):
+        self.kernel_name = kernel_name
+        self.compiled_binary = compiled_binary
+        self.jit_args = jit_args
+        self.params_builder = params_builder_cls(
+            kernel_name=kernel_name,
+            compiled_binary=compiled_binary,
+            jit_args=jit_args,
+            jit_fn=jit_fn,
+        )
 
 
 def create_aot_kernel(
