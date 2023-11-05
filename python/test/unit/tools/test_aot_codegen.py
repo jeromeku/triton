@@ -1,6 +1,6 @@
 import os
 
-from triton.tools.aot.codegen import HeaderGenerator, SourceGenerator
+from triton.tools.aot import HeaderGenerator, Linker, SourceGenerator
 
 
 def _preprocess_src(src):
@@ -119,3 +119,10 @@ def test_aot_linker_source_codegen(source_generator: SourceGenerator, reference_
     print(f"actual:\n{actual_source}")
     print(f"reference:\n{reference_source}")
     check_codegen(actual_source, reference_source)
+
+
+def test_aot_linker_codegen(headers, reference_header, reference_source):
+    linker = Linker(headers)
+    result = linker.generate()
+    check_codegen(result.header, reference_header)
+    check_codegen(result.source, reference_source)

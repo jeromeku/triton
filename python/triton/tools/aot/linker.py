@@ -1,8 +1,16 @@
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from triton.tools.aot.codegen import HeaderGenerator
+from dataclasses import dataclass
+
+from triton.tools.aot.codegen import HeaderGenerator, SourceGenerator
 from triton.tools.aot.parsers import HeaderParser, KernelLinkerMeta
+
+
+@dataclass
+class LinkerCodegenResult:
+    header: str
+    source: str
 
 
 class Linker:
@@ -10,19 +18,12 @@ class Linker:
     Generates dispatcher code for from compiled triton kernels
     """
 
-    HEADER_TEMPLATE = """
-#include <cuda.h>
-{algo_decls}
-{get_num_algos_decl}
-{global_decl}
-"""
-
     def __init__(
         self,
         headers: List[str],
-        out_path: Path,
-        header_parser=HeaderParser,
-        header_generator=HeaderGenerator,
+        header_parser_cls=HeaderParser,
+        header_generator_cls=HeaderGenerator,
+        source_generator_cls=SourceGenerator,
         prefix: Optional[str] = "",
     ):
         """
@@ -31,15 +32,18 @@ class Linker:
 
         """
         self.headers = headers
-        self.out_path = out_path if isinstance(out_path, Path) else Path(out_path)
+        # self.out_path = out_path if isinstance(out_path, Path) else Path(out_path)
         self.prefix = prefix
-        self.header_parser = header_parser()
-        self.header_generator = header_generator
+        self.header_parser_cls = header_parser_cls
+        self.header_generator_cls = header_generator_cls
+        self.source_generator_cls = source_generator_cls
 
-    def run(self):
-        kernels = self.parse_headers()
-        meta = self.generate_headers(kernels)
-        self.generate_sources(meta)
+    def generate(self):
+        kernels = self.header_parser_cls().parse(self.headers)
+        header = self.header_generator_cls(kernels=kernels).generate()
+        source = self.source_generator_cls(kernels=kernels).generate()
+
+        return LinkerCodegenResult(header, source)
 
     def parse_headers(self):
         for header in self.headers:
