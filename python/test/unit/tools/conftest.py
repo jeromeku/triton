@@ -69,21 +69,6 @@ def parsed_kernel_metas(headers):
     return kernels
 
 
-REFERENCE_ADD_KERNEL_HEADER = """
-#include <cuda.h>
-
-CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
-void load_add_kernel_1024_warps4xstages3();
-void unload_add_kernel_1024_warps4xstages3();
-    
-int add_kernel_get_num_algos(void);
-
-CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
-CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements, int algo_id);
-void load_add_kernel();
-void unload_add_kernel();
-"""
-
 REFERENCE_ADD_KERNEL_ALGO_DECL = """
 CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
 void load_add_kernel_1024_warps4xstages3();
@@ -128,9 +113,31 @@ def reference_global_decl(headers):
         raise ValueError(f"Unknown header: {list(headers)}")
 
 
+REFERENCE_ADD_KERNEL_HEADER = """
+#include <cuda.h>
+
+CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
+void load_add_kernel_1024_warps4xstages3();
+void unload_add_kernel_1024_warps4xstages3();
+    
+int add_kernel_get_num_algos(void);
+
+CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
+CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements, int algo_id);
+void load_add_kernel();
+void unload_add_kernel();
+"""
+
+
 @pytest.fixture
-def reference_dispatcher_defs():
-    defs = """
+def reference_header(headers):
+    if any("add_kernel" in str(h) for h in headers):
+        return REFERENCE_ADD_KERNEL_HEADER.strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
+REFERENCE_ADD_KERNEL_DISPATCHER_DEFS = """
 // launcher for: add_kernel_1024_warps4xstages3
 CUresult add_kernel_8d4b99fa_0d1d2d3de(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
 
@@ -153,34 +160,49 @@ void unload_add_kernel_1024_warps4xstages3() {
   unload_add_kernel_8d4b99fa_0d1d2d3de();
 }
 """
-    return defs.strip()
 
 
 @pytest.fixture
-def reference_func_pointer_defs():
-    defs = """
+def reference_dispatcher_defs(headers):
+    if any("add_kernel" in str(h) for h in headers):
+        return REFERENCE_ADD_KERNEL_DISPATCHER_DEFS.strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
+REFERENCE_ADD_KERNEL_FUNC_POINTER_DEFS = """
 typedef CUresult (*kernel_func_t)(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
 kernel_func_t add_kernel_kernels[] = {
   add_kernel_1024_warps4xstages3,
 };
 """
-    return defs.strip()
 
 
 @pytest.fixture
-def reference_const_dispatcher_defs():
-    defs = """
+def reference_func_pointer_defs(headers):
+    if any("add_kernel" in str(h) for h in headers):
+        return REFERENCE_ADD_KERNEL_FUNC_POINTER_DEFS.strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
+REFERENCE_ADD_KERNEL_CONST_DISPATCHER_DEFS = """
 CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements, int algo_id){
   assert (algo_id < (int)sizeof(add_kernel_kernels));
   return add_kernel_kernels[algo_id](stream, x_ptr, y_ptr, output_ptr, n_elements);
 }
 """
-    return defs.strip()
 
 
 @pytest.fixture
-def reference_load_defs():
-    defs = """
+def reference_const_dispatcher_defs(headers):
+    if any("add_kernel" in str(h) for h in headers):
+        return REFERENCE_ADD_KERNEL_CONST_DISPATCHER_DEFS.strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
+REFERENCE_ADD_KERNEL_LOAD_DEFS = """
 void load_add_kernel(void){
   load_add_kernel_1024_warps4xstages3();
 }
@@ -189,33 +211,42 @@ void unload_add_kernel(void){
   unload_add_kernel_1024_warps4xstages3();
 }
 """
-    return defs.strip()
 
 
 @pytest.fixture
-def reference_get_num_algos_def():
-    defs = """
+def reference_load_defs(headers):
+    if any("add_kernel" in str(h) for h in headers):
+        return REFERENCE_ADD_KERNEL_LOAD_DEFS.strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
+REFERENCE_ADD_KERNEL_GET_NUM_ALGOS_DEF = """
 int add_kernel_get_num_algos(void){
   return (int)sizeof(add_kernel_kernels);
 }
 """
-    return defs.strip()
 
 
 @pytest.fixture
-def reference_default_algo_def():
-    defs = """
+def reference_get_num_algos_def(headers):
+    if any("add_kernel" in str(h) for h in headers):
+        return REFERENCE_ADD_KERNEL_GET_NUM_ALGOS_DEF.strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
+
+
+REFERENCE_ADD_KERNEL_DEFAULT_ALGO_DEF = """
 CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements){
   return add_kernel(stream, x_ptr, y_ptr, output_ptr, n_elements, 0);
 }
 """
-    return defs.strip()
 
 
 @pytest.fixture
-def reference_header(headers):
+def reference_default_algo_def(headers):
     if any("add_kernel" in str(h) for h in headers):
-        return REFERENCE_ADD_KERNEL_HEADER.strip()
+        return REFERENCE_ADD_KERNEL_DEFAULT_ALGO_DEF.strip()
     else:
         raise ValueError(f"Unknown header: {list(headers)}")
 
