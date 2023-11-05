@@ -13,17 +13,16 @@ class AOTTemplate(dict):
         self.update(self.__dict__)
 
 
-@dataclass(frozen=True)
-class AOT_C_CUDA_Header_Template(AOTTemplate):
-    TEMPLATE_NAME: str = "C CUDA Kernel Header Template"
-    PARAMS = {
+AOT_C_CUDA_Header_Template = AOTTemplate(
+    TEMPLATE_NAME="C CUDA Kernel Header Template",
+    PARAMS={
         "kernel_name",
         "full_signature",
         "algo_info",
         "signature",
         "_placeholder",
-    }
-    TEMPLATE: str = """
+    },
+    TEMPLATE="""
 #ifndef TT_KERNEL_INCLUDES
 #define TT_KERNEL_INCLUDES
 
@@ -38,13 +37,12 @@ void unload_{kernel_name}(void);
 void load_{kernel_name}(void);
 // tt-linker: {kernel_name}:{full_signature}:{algo_info}
 CUresult{_placeholder} {kernel_name}(CUstream stream, {signature});
-"""
+""",
+)
 
-
-@dataclass(frozen=True)
-class AOT_C_CUDA_Source_Template(AOTTemplate):
-    TEMPLATE_NAME: str = "C CUDA Kernel Source Template"
-    PARAMS = {
+AOT_C_CUDA_Source_Template = AOTTemplate(
+    TEMPLATE_NAME="C CUDA Kernel Source Template",
+    PARAMS={
         "kernel_name",
         "bin_size",
         "bin_data",
@@ -58,8 +56,8 @@ class AOT_C_CUDA_Source_Template(AOTTemplate):
         "num_args",
         "arg_pointers",
         "num_warps",
-    }
-    TEMPLATE: str = """
+    },
+    TEMPLATE="""
 /* clang-format off */
 #include <stdio.h>
 #include <stdint.h>
@@ -127,8 +125,8 @@ CUresult {kernel_name}(CUstream stream, {signature}) {{
     if(gX * gY * gZ > 0)
       return cuLaunchKernel({kernel_name}_func, gX, gY, gZ, {num_warps} * 32, 1, 1, {shared}, stream, args, NULL);
 }}
-"""
+""",
+)
 
-
-DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE = AOT_C_CUDA_Header_Template()
-DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE = AOT_C_CUDA_Source_Template()
+DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE = AOT_C_CUDA_Header_Template
+DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE = AOT_C_CUDA_Source_Template
