@@ -198,37 +198,15 @@ CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_pt
     return defs.strip()
 
 
-# @pytest.fixture
-# def reference_header():
-#     header = """
-# #include <cuda.h>
-
-# CUresult add_kernel_1024_warps4xstages3(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
-# void load_add_kernel_1024_warps4xstages3();
-# void unload_add_kernel_1024_warps4xstages3();
-
-# int add_kernel_get_num_algos(void);
-
-# CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements);
-# CUresult add_kernel(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_ptr, CUdeviceptr output_ptr, int32_t n_elements, int algo_id);
-# void load_add_kernel();
-# void unload_add_kernel();
-# """
-#     return header.strip()
-
-
 @pytest.fixture
 def reference_header(headers):
-    print(headers)
     if any("add_kernel" in str(h) for h in headers):
         return REFERENCE_ADD_KERNEL_HEADER.strip()
     else:
         raise ValueError(f"Unknown header: {list(headers)}")
 
 
-@pytest.fixture
-def reference_source():
-    src = """
+REFERENCE_ADD_KERNEL_SOURCE = """
 #include <cuda.h>
 #include <stdint.h>
 #include <assert.h>
@@ -282,7 +260,14 @@ CUresult add_kernel_default(CUstream stream, CUdeviceptr x_ptr, CUdeviceptr y_pt
   return add_kernel(stream, x_ptr, y_ptr, output_ptr, n_elements, 0);
 }
 """
-    return src.strip()
+
+
+@pytest.fixture
+def reference_source(headers):
+    if any("add_kernel" in str(h) for h in headers):
+        return REFERENCE_ADD_KERNEL_SOURCE.strip()
+    else:
+        raise ValueError(f"Unknown header: {list(headers)}")
 
 
 @pytest.fixture
