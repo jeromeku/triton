@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from .templates import (
     DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE,
     DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE,
+    AOTTemplate,
 )
 from triton.compiler.code_generator import kernel_suffix
 from triton.compiler.compiler import CompiledKernel
@@ -142,15 +143,30 @@ class AOTParams(_DataClassDict):
 
 
 class AOTCompilerParamsBuilder(ABC):
+    HEADER_TEMPLATE: AOTTemplate
+    SOURCE_TEMPLATE: AOTTemplate
+
     @abstractmethod
     def build(self, **kwargs):
         ...
 
-    def validate(self):
-        ...
+    def _validate(self, template, params: Dict[str, Any]):
+        """Check that all template params are present"""
+
+        missing_keys = template.PARAMS - set(params.keys())
+        if missing_keys:
+            raise ValueError(
+                f"Missing following expected keys in template {template.TEMPLATE_NAME}: {missing_keys}"
+            )
+
+    def _validate_header(self, params):
+        self._validate(self.HEADER_TEMPLATE, params)
+
+    def _validate_source(self, params):
+        self._validate(self.SOURCE_TEMPLATE, params)
 
 
-class AOT_C_CUDA_ParamsBuilder:
+class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
     HEADER_TEMPLATE = DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE
     SOURCE_TEMPLATE = DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE
 
@@ -269,21 +285,6 @@ class AOT_C_CUDA_ParamsBuilder:
             _placeholder=_placeholder,
         )
         return params.build()
-
-    def _validate(self, template, params: Dict[str, Any]):
-        """Check that all template params are present"""
-
-        missing_keys = self.template.PARAMS - set(params.keys())
-        if missing_keys:
-            raise ValueError(
-                f"Missing following expected keys in template {template.TEMPLATE_NAME}: {missing_keys}"
-            )
-
-    def _validate_header(self, params):
-        self._validate(self.HEADER_TEMPLATE, params)
-
-    def _validate_source(self, params):
-        self._validate(self.SOURCE_TEMPLATE, params)
 
     def build(self, **kwargs):
         signatures = self._generate_signatures()
