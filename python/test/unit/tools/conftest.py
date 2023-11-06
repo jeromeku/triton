@@ -59,17 +59,17 @@ def fixture_path(request):
 
 
 @pytest.fixture
-def header_generator(parsed_kernel_metas):
-    from triton.tools.aot import HeaderGenerator
+def C_CUDA_header_generator(parsed_C_CUDA_kernel_metas):
+    from triton.tools.aot import C_CUDA_HeaderGenerator
 
-    return HeaderGenerator(kernels=parsed_kernel_metas)
+    return C_CUDA_HeaderGenerator(kernels=parsed_C_CUDA_kernel_metas)
 
 
 @pytest.fixture
-def source_generator(parsed_kernel_metas):
-    from triton.tools.aot import SourceGenerator
+def C_CUDA_source_generator(parsed_C_CUDA_kernel_metas):
+    from triton.tools.aot import C_CUDA_SourceGenerator
 
-    return SourceGenerator(kernels=parsed_kernel_metas)
+    return C_CUDA_SourceGenerator(kernels=parsed_C_CUDA_kernel_metas)
 
 
 @pytest.fixture
@@ -84,10 +84,10 @@ def headers(fixture_path):
 
 
 @pytest.fixture
-def parsed_kernel_metas(headers):
-    from triton.tools.aot.parsers import HeaderParser
+def parsed_C_CUDA_kernel_metas(headers):
+    from triton.tools.aot.parsers import C_CUDA_HeaderParser
 
-    parser = HeaderParser()
+    parser = C_CUDA_HeaderParser()
     kernels = parser.parse(headers)
     return kernels
 

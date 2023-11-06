@@ -39,7 +39,7 @@ class HeaderGenerator(ABC):
         ...
 
 
-class C_CUDA_HeaderGenerator:
+class C_CUDA_HeaderGenerator(HeaderGenerator):
     """Generates header for dispatcher code for from compiled triton kernels"""
 
     ALGO_DECL_TEMPLATE = DEFAULT_ALGO_DECL_TEMPLATE
@@ -112,7 +112,7 @@ class SourceGenerator(ABC):
         ...
 
 
-class C_CUDA_SourceGenerator:
+class C_CUDA_SourceGenerator(SourceGenerator):
     """Generates dispatcher code for from compiled triton kernels
 
     TODO: refactor to use templates

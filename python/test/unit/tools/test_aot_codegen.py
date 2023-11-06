@@ -155,14 +155,6 @@ def test_aot_compiler_codegen(
     check_codegen(source, reference_compiler_source)
 
 
-def test_aot_compiler_codegen(reference_compiler_params):
-    print(reference_compiler_params)
-
-
-def test_aot_compiler_params():
-    pass
-
-
 def test_aot_header_parser(headers):
     from triton.tools.aot.parsers import HeaderParser
 
@@ -172,27 +164,31 @@ def test_aot_header_parser(headers):
     # TODO: Add more tests
 
 
-def test_aot_linker_algo_decl(header_generator: HeaderGenerator, reference_algo_decl):
-    actual_decl = header_generator._make_algo_decls()
+def test_aot_linker_algo_decl(
+    C_CUDA_header_generator: HeaderGenerator, reference_algo_decl
+):
+    actual_decl = C_CUDA_header_generator._make_algo_decls()
     check_codegen(actual_decl, reference_algo_decl)
 
 
 def test_aot_linker_algo_get_num_algo_decl(
-    header_generator: HeaderGenerator, reference_get_num_algo_decl
+    C_CUDA_header_generator: HeaderGenerator, reference_get_num_algo_decl
 ):
-    actual_decl = header_generator._make_get_num_algos_decl()
+    actual_decl = C_CUDA_header_generator._make_get_num_algos_decl()
     check_codegen(actual_decl, reference_get_num_algo_decl)
 
 
 def test_aot_linker_global_decl(
-    header_generator: HeaderGenerator, reference_global_decl
+    C_CUDA_header_generator: HeaderGenerator, reference_global_decl
 ):
-    actual_decl = header_generator._make_global_decl()
+    actual_decl = C_CUDA_header_generator._make_global_decl()
     check_codegen(actual_decl, reference_global_decl)
 
 
-def test_aot_linker_header_codegen(header_generator: HeaderGenerator, reference_header):
-    actual_header = header_generator.generate()
+def test_aot_linker_header_codegen(
+    C_CUDA_header_generator: HeaderGenerator, reference_header
+):
+    actual_header = C_CUDA_header_generator.generate()
     check_codegen(actual_header, reference_header)
 
 
@@ -216,58 +212,62 @@ def test_aot_linker_header_codegen(header_generator: HeaderGenerator, reference_
 
 
 def test_aot_linker_func_pointer_defs(
-    source_generator: SourceGenerator, reference_func_pointer_defs
+    C_CUDA_source_generator: SourceGenerator, reference_func_pointer_defs
 ):
-    defs = source_generator._make_func_pointers()
+    defs = C_CUDA_source_generator._make_func_pointers()
     check_codegen(actual=defs, expected=reference_func_pointer_defs)
 
 
 def test_aot_linker_const_dispatcher_defs(
-    source_generator: SourceGenerator,
+    C_CUDA_source_generator: SourceGenerator,
     reference_const_dispatcher_defs,
 ):
-    defs = source_generator._make_kernel_meta_const_dispatcher()
+    defs = C_CUDA_source_generator._make_kernel_meta_const_dispatcher()
     check_codegen(actual=defs, expected=reference_const_dispatcher_defs)
 
 
 def test_aot_linker_source_gen_dispatcher_defs(
-    source_generator: SourceGenerator, reference_dispatcher_defs
+    C_CUDA_source_generator: SourceGenerator, reference_dispatcher_defs
 ):
-    defs = source_generator._make_defs()
+    defs = C_CUDA_source_generator._make_defs()
 
     check_codegen(actual=defs, expected=reference_dispatcher_defs)
 
 
-def test_aot_linker_load_defs(source_generator: SourceGenerator, reference_load_defs):
-    actual_defs = source_generator._make_kernel_load_defs()
+def test_aot_linker_load_defs(
+    C_CUDA_source_generator: SourceGenerator, reference_load_defs
+):
+    actual_defs = C_CUDA_source_generator._make_kernel_load_defs()
     check_codegen(actual_defs, reference_load_defs)
 
 
 def test_aot_linker_get_num_algos_def(
-    source_generator: SourceGenerator, reference_get_num_algos_def
+    C_CUDA_source_generator: SourceGenerator, reference_get_num_algos_def
 ):
-    actual_defs = source_generator._make_get_num_algos_def()
+    actual_defs = C_CUDA_source_generator._make_get_num_algos_def()
     check_codegen(actual_defs, reference_get_num_algos_def)
 
 
 def test_aot_linker_default_algo_def(
-    source_generator: SourceGenerator, reference_default_algo_def
+    C_CUDA_source_generator: SourceGenerator, reference_default_algo_def
 ):
-    actual_def = source_generator._make_default_algo_kernel_def()
+    actual_def = C_CUDA_source_generator._make_default_algo_kernel_def()
     check_codegen(actual_def, reference_default_algo_def)
 
 
-def test_aot_linker_source_codegen(source_generator: SourceGenerator, reference_source):
-    actual_source = source_generator.generate()
+def test_aot_linker_source_codegen(
+    C_CUDA_source_generator: SourceGenerator, reference_source
+):
+    actual_source = C_CUDA_source_generator.generate()
     print(f"actual:\n{actual_source}")
     print(f"reference:\n{reference_source}")
     check_codegen(actual_source, reference_source)
 
 
 def test_aot_linker_codegen(headers, reference_header, reference_source):
-    from triton.tools.aot import Linker
+    from triton.tools.aot import AOT_C_CUDA_Linker
 
-    linker = Linker(headers)
+    linker = AOT_C_CUDA_Linker(headers)
     result = linker.generate()
     check_codegen(result.header, reference_header)
     check_codegen(result.source, reference_source)
