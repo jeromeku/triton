@@ -181,7 +181,7 @@ class TraceConfig(dict):
     # Launch params
     num_warps: Optional[int] = None
     num_stages: Optional[int] = None
-    num_ctas: Optional[int] = None
+    num_ctas: int = 1
     enable_warp_specialization: bool = False
     enable_fp_fusion: bool = True
 
@@ -194,7 +194,8 @@ class TraceConfig(dict):
     extern_libs: List[str] = None
     stream: Optional[int] = None
     warmup: bool = False
-
+    device: Optional[int] = None
+    device_type: Optional[str] = None
     # Trace options
     trace: bool = True
     trace_dir: Optional[Path] = None
@@ -204,7 +205,7 @@ class TraceConfig(dict):
 
 
 @dataclass
-class MatMulConfig:
+class MatMulConfig(dict):
     dtype_in: torch.dtype = torch.float16
     dtype_out: torch.dtype = torch.float32
     M: int = 16
@@ -236,39 +237,44 @@ class KernelTracer(ABC):
 
     # self._initialize_kernel_params()
 
-    def _initialize_kernel_params(self):
-        self.args = self.set_args()
-        self.constants = self.set_constants()
-        self.grid = self.set_grid()
+    # def _initialize_kernel_params(self):
+    #     self.args = self.set_args()
+    #     self.constants = self.set_constants()
+    #     self.grid = self.set_grid()
 
-    def check_args(self, kernel_args):
-        assert len(kernel_args) == len(
-            self.arg_names
-        ), f"Incorrect number of args, expected {self.arg_names}"
-        for i, (expected_key, actual_key) in enumerate(
-            zip(self.arg_names, kernel_args.keys())
-        ):
+    def check_specializations(self, params, expected_specializations):
+        no_specs = [p.name for p in params if p.do_not_specialize]
+
+        assert set(no_specs) == set(
+            expected_specializations
+        ), f"Incorrect specializations, expected {expected_specializations}"
+
+    def check_args(self, args, expected_args):
+        assert len(args) == len(
+            expected_args
+        ), f"Incorrect number of args, expected {expected_args}"
+        for i, (expected_key, actual_key) in enumerate(zip(expected_args, args.keys())):
             assert (
                 expected_key == actual_key
             ), f"Incorrect arg name at position {i}, expected {expected_key}, got {actual_key}"
 
-    def check_constants(self, kernel_constants):
+    def check_constants(self, kernel_constants, expected_constants):
         assert set(kernel_constants.keys()) == set(
-            self.constant_names
-        ), f"Incorrect constants, expected {self.constant_names}"
+            expected_constants
+        ), f"Incorrect constants, expected {expected_constants}"
 
     @abstractmethod
-    def set_args(self):
+    def build_args(self, config):
         """Set args for the kernel as an OrderedDict"""
         ...
 
     @abstractmethod
-    def set_constants(self):
+    def build_constants(self, config):
         """Set constants for the kernel as a dict"""
         ...
 
     @abstractmethod
-    def set_grid(self):
+    def build_grid(self, config):
         """Set grid for the kernel as a callable or a 3-tuple of ints"""
         ...
 
@@ -279,23 +285,31 @@ class KernelTracer(ABC):
             additional_jit_kwargs: number of warps, specializations, etc. -- see `triton.runtime.jit.JITFunction.run` special args.
         """
 
-        self.jitted_fn = JITFunction(
+        do_not_specialize = trace_config.pop("do_not_specialize")
+        debug = trace_config.pop("debug")
+        noinline = trace_config.pop("noinline")
+
+        jitted_fn = JITFunction(
             self.KERNEL,
-            do_not_specialize=trace_config.pop("do_not_specialize"),
-            debug=trace_config.pop("debug"),
-            noinline=trace_config.pop("noinline"),
+            do_not_specialize=do_not_specialize,
+            debug=debug,
+            noinline=noinline,
         )
+        self.check_specializations(jitted_fn.params, do_not_specialize)
 
-        self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
-        self.arg_names = [p.name for p in self.jitted_fn.params if not p.is_constexpr]
+        expected_constants = [p.name for p in jitted_fn.params if p.is_constexpr]
+        expected_args = [p.name for p in jitted_fn.params if not p.is_constexpr]
+        # Check do not specialize
 
-        args = self.set_args(kernel_config)
-        self.check_args(args)
+        args = self.build_args(kernel_config)
+        self.check_args(args, expected_args)
 
-        constants = self.set_constants(kernel_config)
-        self.check_constants(constants)
+        constants = self.build_constants(kernel_config)
+        self.check_constants(constants, expected_constants)
 
-        compilation_artifact: CompiledArtifact = self.jitted_fn[self.grid](
+        grid = self.build_grid(kernel_config)
+
+        compilation_artifact: CompiledArtifact = jitted_fn[grid](
             *args.values(),
             **constants,
             **trace_config,
@@ -306,37 +320,45 @@ class KernelTracer(ABC):
 class MatMulKernelTracer(KernelTracer):
     KERNEL = KERNELS_DIR / "matmul_kernel.py"
 
-    def __init__(
-        self,
-        config: MatMulConfig,
-        do_not_specialize=None,
-        debug=None,
-        noinline=None,
-    ):
-        self.config = config
-        self.checks = []
-        super().__init__(
-            do_not_specialize=do_not_specialize, debug=debug, noinline=noinline
-        )
+    # def __init__(
+    #     self,
+    #     config: MatMulConfig,
+    #     do_not_specialize=None,
+    #     debug=None,
+    #     noinline=None,
+    # ):
+    #     self.config = config
+    #     self.checks = []
+    #     super().__init__(
+    #         do_not_specialize=do_not_specialize, debug=debug, noinline=noinline
+    #     )
 
-    def trace(self, configs: List[MatMulConfig]):
-        pass
-
-    def set_args(
-        self,
+    def trace(
+        self, kernel_configs: List[MatMulConfig], trace_configs: List[TraceConfig]
     ):
+        outputs = []
+        checks = []
+        traces = []
+        for kconfig, tconfig in zip(kernel_configs, trace_configs):
+            trace = super().trace(kconfig, tconfig)
+            traces.append(trace)
+            checks.append(self.CHECK)
+            outputs.append(self.C.detach().cpu())
+        return traces, outputs, checks
+
+    def build_args(self, config: MatMulConfig):
         # Set up matrices
-        torch.manual_seed(self.config.seed)
+        torch.manual_seed(config.seed)
 
-        A_shape = self.config.M, self.config.K
-        B_shape = self.config.K, self.config.N
-        C_shape = self.config.M, self.config.N
-        A = torch.randn(A_shape, dtype=self.config.dtype_in, device="cuda").contiguous()
-        B = torch.randn(B_shape, dtype=self.config.dtype_in, device="cuda").contiguous()
-        C = torch.empty(C_shape, dtype=self.config.dtype_out, device="cuda")
+        A_shape = config.M, config.K
+        B_shape = config.K, config.N
+        C_shape = config.M, config.N
+        A = torch.randn(A_shape, dtype=config.dtype_in, device="cuda").contiguous()
+        B = torch.randn(B_shape, dtype=config.dtype_in, device="cuda").contiguous()
+        C = torch.empty(C_shape, dtype=config.dtype_out, device="cuda")
 
         # Save for verification
-        self.CHECK = torch.matmul(A, B).to(self.config.dtype_out).detach().cpu()
+        self.CHECK = torch.matmul(A, B).to(config.dtype_out).detach().cpu()
         self.C = C
         M, K = A.shape
         _, N = B.shape
@@ -365,17 +387,20 @@ class MatMulKernelTracer(KernelTracer):
 
         return args
 
-    def set_constants(self):
+    def build_constants(self, config: MatMulConfig):
         return {
-            "BLOCK_M": self.config.BLOCK_M,
-            "BLOCK_N": self.config.BLOCK_N,
-            "BLOCK_K": self.config.BLOCK_K,
+            "BLOCK_M": config.BLOCK_M,
+            "BLOCK_N": config.BLOCK_N,
+            "BLOCK_K": config.BLOCK_K,
         }
 
-    def set_grid(self):
+    def build_grid(self, config: MatMulConfig):
         grid = lambda META: (
-            triton.cdiv(self.config.M, META["BLOCK_M"])
-            * triton.cdiv(self.config.N, META["BLOCK_N"]),
+            (
+                triton.cdiv(config.M, META["BLOCK_M"]),
+                triton.cdiv(config.N, META["BLOCK_N"]),
+                1,
+            )
         )
         return grid
 
@@ -386,21 +411,20 @@ class MatMulKernelTracer(KernelTracer):
 matmul_config_16x16x16 = MatMulConfig()
 matmul_config_256x256x256 = MatMulConfig()
 matmul_config = matmul_config_256x256x256
-do_not_specialize = ["stride_cm, stride_am"]
-matmul_tracer = MatMulKernelTracer(matmul_config, do_not_specialize=do_not_specialize)
+trace_config = TraceConfig(do_not_specialize=["stride_cm", "stride_am"])
+matmul_tracer = MatMulKernelTracer()
 
 
 trace_dir = Path("traced_kernels").absolute()
 if not trace_dir.exists():
     trace_dir.mkdir(parents=True, exist_ok=True)
 
-artifact = matmul_tracer.trace(num_warps=1, trace_dir=trace_dir)
+traces, outputs, checks = matmul_tracer.trace([matmul_config], [trace_config])
 # Check signatures
 
-expected = matmul_tracer.CHECK
-actual = matmul_tracer.C.detach().cpu()
-is_close = torch.allclose(expected, actual, atol=1e-1, rtol=0)
-print(f"Is close {is_close}")
+for actual, expected in zip(outputs, checks):
+    is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
+    print(f"Is close {is_close}")
 
 
 # TODO use ordereddict for args
