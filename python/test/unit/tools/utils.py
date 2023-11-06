@@ -263,9 +263,17 @@ class KernelTracer(ABC):
 class MatMulKernelTracer(KernelTracer):
     KERNEL = KERNELS_DIR / "matmul_kernel.py"
 
-    def __init__(self, **config):
-        self.config = MatMulConfig(**config)
-        super().__init__()
+    def __init__(
+        self,
+        config: MatMulConfig,
+        do_not_specialize=None,
+        debug=None,
+        noinline=None,
+    ):
+        self.config = config
+        super().__init__(
+            do_not_specialize=do_not_specialize, debug=debug, noinline=noinline
+        )
 
     def set_args(
         self,
@@ -327,21 +335,24 @@ class MatMulKernelTracer(KernelTracer):
 
 # sys.path.insert(0, KERNELS_DIR)
 
-matmul_config = MatMulConfig()
-matmul_tracer = MatMulKernelTracer(**matmul_config)
+matmul_config_16x16x16 = MatMulConfig()
+matmul_config_256x256x256 = MatMulConfig()
+matmul_config = matmul_config_256x256x256
+do_not_specialize = ["stride_cm, stride_am"]
+matmul_tracer = MatMulKernelTracer(matmul_config)
 artifact = matmul_tracer.trace(num_warps=1)
 # Check
 
 expected = matmul_tracer.CHECK
 actual = matmul_tracer.C.detach().cpu()
-print(f"Expected dtype: {expected.dtype}")
-print(f"Actual dtype: {actual.dtype}")
-print(f"Expected shape: {expected.shape}")
-print(f"Actual shape: {actual.shape}")
-print(f"Expected avg: {expected.mean()}")
-print(f"Actual avg: {actual.mean()}")
-print(f"Expected {expected}")
-print(f"Actual {actual}")
+# print(f"Expected dtype: {expected.dtype}")
+# print(f"Actual dtype: {actual.dtype}")
+# print(f"Expected shape: {expected.shape}")
+# print(f"Actual shape: {actual.shape}")
+# print(f"Expected avg: {expected.mean()}")
+# print(f"Actual avg: {actual.mean()}")
+# print(f"Expected {expected}")
+# print(f"Actual {actual}")
 
 is_close = torch.allclose(expected, actual, atol=1e-1, rtol=0)
 print(f"Is close {is_close}")
