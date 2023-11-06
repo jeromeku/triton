@@ -1,10 +1,16 @@
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from dataclasses import dataclass
 
-from ..parsers import HeaderParser, KernelLinkerMeta
-from .codegen import HeaderGenerator, SourceGenerator
+from ..parsers import C_CUDA_HeaderParser, HeaderParser, KernelLinkerMeta
+from .codegen import (
+    C_CUDA_HeaderGenerator,
+    C_CUDA_SourceGenerator,
+    HeaderGenerator,
+    SourceGenerator,
+)
 
 
 @dataclass
@@ -13,17 +19,16 @@ class LinkerCodegenResult:
     source: str
 
 
-class Linker:
-    """
-    Generates dispatcher code for from compiled triton kernels
-    """
+class AOTLinker(ABC):
+    """Generates dispatcher code for compiled Triton kernels"""
+
+    HEADER_PARSER_CLS: HeaderParser
+    HEADER_GENERATOR_CLS: HeaderGenerator
+    SOURCE_GENERATOR_CLS: SourceGenerator
 
     def __init__(
         self,
         headers: List[str],
-        header_parser_cls=HeaderParser,
-        header_generator_cls=HeaderGenerator,
-        source_generator_cls=SourceGenerator,
         prefix: Optional[str] = "",
     ):
         """
@@ -34,84 +39,33 @@ class Linker:
         self.headers = headers
         # self.out_path = out_path if isinstance(out_path, Path) else Path(out_path)
         self.prefix = prefix
-        self.header_parser_cls = header_parser_cls
-        self.header_generator_cls = header_generator_cls
-        self.source_generator_cls = source_generator_cls
 
-    def generate(self):
-        kernels = self.header_parser_cls().parse(self.headers)
-        header = self.header_generator_cls(kernels=kernels).generate()
-        source = self.source_generator_cls(kernels=kernels).generate()
+        # Parse headers for kernel linker metadata
+        self.header_parser = self.HEADER_PARSER_CLS()
+        kernels = self.header_parser.parse(self.headers)
 
-        return LinkerCodegenResult(header, source)
+        self.header_generator = self.HEADER_GENERATOR_CLS(kernels)
+        self.source_generator = self.SOURCE_GENERATOR_CLS(kernels)
 
     def parse_headers(self):
-        for header in self.headers:
-            h_path = Path(header)
-            h_str = h_path.read_text()
-            self.header_parser.extract_linker_meta(h_str)
+        kernels = self.header_parser.parse(self.headers)
 
-        return self.header_parser.kernels
+        return kernels
 
-    def generate_headers(
-        self, kernels: Dict[str, KernelLinkerMeta]
-    ) -> KernelLinkerMeta:
-        algo_decls = [
-            self.header_generator.make_algo_decls(name, meta)
-            for name, meta in kernels.items()
-        ]
-        algo_decl_str = "\n".join(algo_decls)
+    def generate(self):
+        header = self.header_generator.generate()
+        source = self.source_generator.generate()
+        return LinkerCodegenResult(header, source)
 
-        meta_lists = [meta for _, meta in kernels.items()]
-        meta = meta_lists[0][0]
 
-        get_num_algos_decl_str = self.header_generator.make_get_num_algos_decl(meta)
-        global_decl_str = self.header_generator.make_global_decl(meta)
+class AOT_C_CUDA_Linker(AOTLinker):
+    """
+    Generates C CUDA dispatcher code from compiled triton kernels
+    """
 
-        generated_header = self.HEADER_TEMPLATE.format(
-            algo_decls=algo_decl_str,
-            get_num_algos_decl=get_num_algos_decl_str,
-            global_decl=global_decl_str,
-        ).strip()
-
-        output_file = self.out_path.with_suffix(".h")
-        with output_file.open("w") as fp:
-            fp.write(generated_header)
-
-        return output_file, meta
-
-    def generate_sources(
-        self, meta: KernelLinkerMeta, kernels: Dict[str, KernelLinkerMeta]
-    ):
-        pass
-        # defs = [
-        #     make_kernel_hints_dispatcher(name, meta) for name, meta in kernels.items()
-        # ]
-
-        # names = [name for name in kernels.keys()]
-        # func_pointers_def = make_func_pointers(names, meta)
-        # meta_const_def = make_kernel_meta_const_dispatcher(meta)
-        # load_unload_def = make_kernel_load_def(names, meta)
-        # get_num_algos_def = make_get_num_algos_def(meta)
-        # default_algo_kernel = make_default_algo_kernel(meta)
-        # with args.out.with_suffix(".c").open("w") as fp:
-        #     out = ""
-        #     out += "#include <cuda.h>\n"
-        #     out += "#include <stdint.h>\n"
-        #     out += "#include <assert.h>\n"
-        #     out += "\n"
-        #     out += "\n".join(defs)
-        #     out += "\n"
-        #     out += func_pointers_def
-        #     out += "\n"
-        #     out += get_num_algos_def
-        #     out += "\n"
-        #     out += meta_const_def
-        #     out += "\n"
-        #     out += load_unload_def
-        #     out += "\n"
-        #     out += default_algo_kernel
-        #     fp.write(out)
+    HEADER_PARSER_CLS = C_CUDA_HeaderParser
+    HEADER_GENERATOR_CLS = C_CUDA_HeaderGenerator
+    SOURCE_GENERATOR_CLS = C_CUDA_SourceGenerator
 
 
 desc = """

@@ -1,4 +1,5 @@
 import re
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Sequence, Union
@@ -43,11 +44,17 @@ class HeaderParsingPatterns:
     ARG_SUFFIX = re.compile("[c,d]")
 
 
-class HeaderParser:
-    def __init__(self, patterns=HeaderParsingPatterns) -> None:
+class HeaderParser(ABC):
+    def __init__(self, patterns=HeaderParsingPatterns):
         self.patterns = patterns
         self.kernels = defaultdict(list)
 
+    @abstractmethod
+    def parse(self, headers: List[Path | str]) -> Dict[str, List[KernelLinkerMeta]]:
+        ...
+
+
+class C_CUDA_HeaderParser(HeaderParser):
     def parse(self, headers: List[Path | str]) -> Dict[str, List[KernelLinkerMeta]]:
         for header in headers:
             h_path = Path(header)

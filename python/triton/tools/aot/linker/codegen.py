@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Sequence
 
 from .templates import (
@@ -22,21 +23,31 @@ class SignatureGenerator:
         return sig
 
 
-class HeaderGenerator:
-    """Generates header for dispatcher code for from compiled triton kernels"""
-
-    signature_generator = SignatureGenerator
-    ALGO_DECL_TEMPLATE = DEFAULT_ALGO_DECL_TEMPLATE
-    GLOBAL_DECL_TEMPLATE = DEFAULT_GLOBAL_DECL_TEMPLATE
-    HEADER_INCLUDES = DEFAULT_HEADER_INCLUDES
+class HeaderGenerator(ABC):
+    SIGNATURE_GENERATOR = SignatureGenerator
+    DEFAULT_ALGO_DECL_TEMPLATE: str
+    DEFAULT_GLOBAL_DECL_TEMPLATE: str
+    HEADER_INCLUDES: List[str]
 
     def __init__(self, kernels: Dict[str, KernelLinkerMeta]) -> None:
         self.kernels = kernels
         meta_lists = [meta for _, meta in self.kernels.items()]
         self.meta = meta_lists[0][0]
 
+    @abstractmethod
+    def generate(self):
+        ...
+
+
+class C_CUDA_HeaderGenerator:
+    """Generates header for dispatcher code for from compiled triton kernels"""
+
+    ALGO_DECL_TEMPLATE = DEFAULT_ALGO_DECL_TEMPLATE
+    GLOBAL_DECL_TEMPLATE = DEFAULT_GLOBAL_DECL_TEMPLATE
+    HEADER_INCLUDES = DEFAULT_HEADER_INCLUDES
+
     def _make_algo_decl(self, name: str, metas: List[KernelLinkerMeta]):
-        args = self.signature_generator.gen_signature_with_full_args(metas[-1])
+        args = self.SIGNATURE_GENERATOR.gen_signature_with_full_args(metas[-1])
         return self.ALGO_DECL_TEMPLATE.format(
             name=name,
             args=args,
@@ -61,8 +72,8 @@ class HeaderGenerator:
         meta = meta or self.meta
         return self.GLOBAL_DECL_TEMPLATE.format(
             orig_kernel_name=meta.orig_kernel_name,
-            default_args=self.signature_generator.gen_signature_with_full_args(meta),
-            full_args=self.signature_generator.gen_signature_with_full_args(meta),
+            default_args=self.SIGNATURE_GENERATOR.gen_signature_with_full_args(meta),
+            full_args=self.SIGNATURE_GENERATOR.gen_signature_with_full_args(meta),
         )
 
     def generate(self):
@@ -81,14 +92,9 @@ class HeaderGenerator:
         return "\n\n".join([includes, src])
 
 
-class SourceGenerator:
-    """Generates dispatcher code for from compiled triton kernels
-
-    TODO: refactor to use templates
-    """
-
-    signature_generator = SignatureGenerator
-    SOURCE_INCLUDES = DEFAULT_SOURCE_INCLUDES
+class SourceGenerator(ABC):
+    SIGNATURE_GENERATOR = SignatureGenerator
+    SOURCE_INCLUDES: List[str]
 
     def __init__(
         self,
@@ -100,6 +106,19 @@ class SourceGenerator:
             meta_lists = [meta for name, meta in self.kernels.items()]
             meta = meta_lists[0][0]
         self.meta = meta
+
+    @abstractmethod
+    def generate(self):
+        ...
+
+
+class C_CUDA_SourceGenerator:
+    """Generates dispatcher code for from compiled triton kernels
+
+    TODO: refactor to use templates
+    """
+
+    SOURCE_INCLUDES = DEFAULT_SOURCE_INCLUDES
 
     def _condition_fn(self, val, hint):
         if hint == 16:
@@ -144,10 +163,10 @@ class SourceGenerator:
         docs_str = f"// launcher for: {name}\n"
         fn_sig = ""
         for meta in sorted(metas, key=lambda m: -m.num_specs):
-            fn_sig += f"CUresult {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(CUstream stream, {self.signature_generator.gen_signature(meta)});\n"
+            fn_sig += f"CUresult {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(CUstream stream, {self.SIGNATURE_GENERATOR.gen_signature(meta)});\n"
         # src += "\n"
 
-        kernel_sig = f"CUresult {name}(CUstream stream, {self.signature_generator.gen_signature_with_full_args(metas[-1])}){{"
+        kernel_sig = f"CUresult {name}(CUstream stream, {self.SIGNATURE_GENERATOR.gen_signature_with_full_args(metas[-1])}){{"
         # src += "\n"
 
         dispatcher_conds = self._make_dispatcher_conditions(metas)
@@ -177,7 +196,7 @@ class SourceGenerator:
 
     def _make_func_pointers(self) -> str:
         # the table of hint dispatchers
-        src = f"typedef CUresult (*kernel_func_t)(CUstream stream, {self.signature_generator.gen_signature_with_full_args(self.meta)});\n"
+        src = f"typedef CUresult (*kernel_func_t)(CUstream stream, {self.SIGNATURE_GENERATOR.gen_signature_with_full_args(self.meta)});\n"
         src += f"kernel_func_t {self.meta.orig_kernel_name}_kernels[] = {{\n"
         for name in self.kernels.keys():
             src += f"  {name},\n"
@@ -190,7 +209,7 @@ class SourceGenerator:
         meta: KernelLinkerMeta = None,
     ) -> str:
         meta = meta or self.meta
-        src = f"CUresult {meta.orig_kernel_name}(CUstream stream, {self.signature_generator.gen_signature_with_full_args(meta)}, int algo_id){{\n"
+        src = f"CUresult {meta.orig_kernel_name}(CUstream stream, {self.SIGNATURE_GENERATOR.gen_signature_with_full_args(meta)}, int algo_id){{\n"
         src += f"  assert (algo_id < (int)sizeof({meta.orig_kernel_name}_kernels));\n"
         src += f"  return {meta.orig_kernel_name}_kernels[algo_id](stream, {', '.join(meta.arg_names)});\n"
         src += "}\n"
@@ -215,7 +234,7 @@ class SourceGenerator:
 
     def _make_default_algo_kernel_def(self, meta: KernelLinkerMeta = None) -> str:
         meta = meta or self.meta
-        src = f"CUresult {meta.orig_kernel_name}_default(CUstream stream, {self.signature_generator.gen_signature_with_full_args(meta)}){{\n"
+        src = f"CUresult {meta.orig_kernel_name}_default(CUstream stream, {self.SIGNATURE_GENERATOR.gen_signature_with_full_args(meta)}){{\n"
         src += f"  return {meta.orig_kernel_name}(stream, {', '.join(meta.arg_names)}, 0);\n"
         src += "}\n"
         return src
