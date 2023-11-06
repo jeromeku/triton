@@ -1,4 +1,9 @@
-from .compiler import AOT_C_CUDA_Compiler, AOT_C_CUDA_ParamsBuilder, JITCompileArgs
+from .compiler import (
+    AOT_C_CUDA_Compiler,
+    AOT_C_CUDA_ParamsBuilder,
+    CompiledArtifact,
+    JITCompileArgs,
+)
 from .linker import (
     AOT_C_CUDA_Linker,
     AOTLinker,
