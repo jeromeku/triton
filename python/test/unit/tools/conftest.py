@@ -5,57 +5,61 @@ from pathlib import Path
 
 import pytest
 
+# @pytest.fixture(scope="session")
+# def clear_triton_cache():
+#     from triton.runtime.cache import default_cache_dir, default_dump_dir
 
-@pytest.fixture(scope="session")
-def clear_triton_cache():
-    from triton.runtime.cache import default_cache_dir, default_dump_dir
+#     cache_dir = default_cache_dir()
+#     dump_dir = default_dump_dir()
 
-    cache_dir = default_cache_dir()
-    dump_dir = default_dump_dir()
+#     if os.path.exists(cache_dir):
+#         shutil.rmtree(cache_dir)
 
-    if os.path.exists(cache_dir):
-        shutil.rmtree(cache_dir)
+#     if os.path.exists(dump_dir):
+#         shutil.rmtree(dump_dir)
 
-    if os.path.exists(dump_dir):
-        shutil.rmtree(dump_dir)
-
-    yield
+#     yield
 
 
-@pytest.fixture
-def aot_kernel_dir():
-    test_dir = Path("aot_test_kernels").absolute()
+# @pytest.fixture
+# def aot_kernel_dir():
+#     test_dir = Path("aot_test_kernels").absolute()
 
-    if os.path.exists(test_dir):
-        import shutil
+#     if os.path.exists(test_dir):
+#         import shutil
 
-        shutil.rmtree(test_dir)
+#         shutil.rmtree(test_dir)
 
-    os.makedirs(test_dir)
+#     os.makedirs(test_dir)
 
-    yield test_dir
+#     yield test_dir
 
 
 #    shutil.rmtree(test_dir)
 
 
-@pytest.fixture
-def linker_test_dir():
-    test_dir = (Path(__file__).parent / "linker_test").absolute()
+# @pytest.fixture
+# def linker_test_dir():
+#     test_dir = (Path(__file__).parent / "linker_test").absolute()
 
-    if os.path.exists(test_dir):
-        import shutil
+#     if os.path.exists(test_dir):
+#         import shutil
 
-        shutil.rmtree(test_dir)
+#         shutil.rmtree(test_dir)
 
-    os.makedirs(test_dir)
+#     os.makedirs(test_dir)
 
-    yield test_dir
+#     yield test_dir
 
 
 @pytest.fixture(params=["add_kernel"])
 def fixture_path(request):
     return (Path(__file__).parent / "fixtures" / "codegen" / request.param).absolute()
+
+
+@pytest.fixture(params=["add_kernel", "matmul_kernel"])
+def kernel_path(request, fixture_path):
+    return fixture_path / f"{request.param}.py"
 
 
 @pytest.fixture

@@ -9,7 +9,15 @@ from triton.runtime.jit import JITFunction
 from triton.tools.aot import AOT_C_CUDA_ParamsBuilder, HeaderGenerator, SourceGenerator
 from triton.tools.jitted_aot import CompiledArtifact
 
+# TODO: Create test cases for matmul; replicate existing aot tests
+# Create matmul kernel fixture
+# Create kernel headers / sources and linker headers and sources using AOT scripts
+# Compare to generated headers and sources from refactored codegen classes
+# Rename AOT_JIT to AOT_Trace
+# Migrate test_jit_aot tests to test_aot_trace
 
+
+# TODO: refactor jit.py to use refactored codegen classes
 def _preprocess_src(src):
     return list(filter(lambda x: x.strip(), src.split("\n")))
 
