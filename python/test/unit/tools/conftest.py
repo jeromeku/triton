@@ -52,14 +52,24 @@ import pytest
 #     yield test_dir
 
 
-@pytest.fixture(params=["add_kernel"])
+@pytest.fixture
 def fixture_path(request):
-    return (Path(__file__).parent / "fixtures" / "codegen" / request.param).absolute()
+    return (Path(__file__).parent / "fixtures").absolute()
 
 
-@pytest.fixture(params=["add_kernel", "matmul_kernel"])
-def kernel_path(request, fixture_path):
-    return fixture_path / f"{request.param}.py"
+@pytest.fixture
+def kernel_path(fixture_path):
+    return fixture_path / "kernels"
+
+
+@pytest.fixture
+def headers_path(fixture_path):
+    return fixture_path / "headers"
+
+
+@pytest.fixture
+def sources_path(fixture_path):
+    return fixture_path / "sources"
 
 
 @pytest.fixture

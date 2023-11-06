@@ -39,27 +39,23 @@ def check_dir(dir):
     return dir
 
 
+@pytest.mark.parametrize("kernel_file", ["add_kernel.py"])
 @pytest.mark.parametrize(
     "dtype",
-    [torch.float32],
+    [torch.float16],
     ids=lambda x: str(x),
 )
-@pytest.mark.parametrize("test_data_fn", ["ones"])
-def test_aot_compiler_params(dtype, test_data_fn):
-    if test_data_fn == "randn" and "int" in str(dtype):
-        pytest.skip("randn not supported for int types")
-    # Test params
+def test_aot_compiler_params(kernel_path, dtype, kernel_file):
     N = 1024
     BLOCK_SIZE = 1024
     NUM_WARPS = 4
     seed = 0
-    data_generator = getattr(torch, test_data_fn)
 
     torch.manual_seed(seed)
-    x = data_generator(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
-    y = data_generator(N, dtype=dtype, device="cuda")
+    x = torch.ones(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
+    y = torch.ones(N, dtype=dtype, device="cuda")
 
-    test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
+    test_kernel = kernel_path / kernel_file
 
     # Set up aot kernel directory
     test_dir = Path("aot_compilation_spec_test").absolute()
@@ -103,32 +99,32 @@ def test_aot_compiler_params(dtype, test_data_fn):
         ), f"Key: {k}\nExpected: {expected_spec[k]}\nActual: {actual_spec[k]}"
 
 
-# TODO: Refactor set up code
+@pytest.mark.parametrize("kernel_file", ["add_kernel.py"])
 @pytest.mark.parametrize(
     "dtype",
     [torch.float16],
     ids=lambda x: str(x),
 )
-@pytest.mark.parametrize("test_data_fn", ["ones"])
 def test_aot_compiler_codegen(
-    dtype, test_data_fn, reference_compiler_header, reference_compiler_source
+    dtype,
+    kernel_path,
+    kernel_file,
+    reference_compiler_header,
+    reference_compiler_source,
 ):
     from triton.tools.aot import AOT_C_CUDA_Compiler
 
-    if test_data_fn == "randn" and "int" in str(dtype):
-        pytest.skip("randn not supported for int types")
     # Test params
     N = 1024
     BLOCK_SIZE = 1024
     NUM_WARPS = 4
     seed = 0
-    data_generator = getattr(torch, test_data_fn)
 
     torch.manual_seed(seed)
-    x = data_generator(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
-    y = data_generator(N, dtype=dtype, device="cuda")
+    x = torch.ones(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
+    y = torch.ones(N, dtype=dtype, device="cuda")
 
-    test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
+    test_kernel = kernel_path / kernel_file
 
     # Set up aot kernel directory
     test_dir = Path("aot_compilation_codegen_test_f16").absolute()
