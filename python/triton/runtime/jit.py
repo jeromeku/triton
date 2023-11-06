@@ -476,6 +476,8 @@ class JITFunction(KernelInterface[T]):
         warmup = get_special_arg("warmup", False)
         device = get_special_arg("device")
         device_type = get_special_arg("device_type")
+
+        # Additional arguments for tracing
         trace = get_special_arg("trace", False)
         trace_dir = get_special_arg("trace_dir", None)
         # Bind the remaining arguments to `fn`.

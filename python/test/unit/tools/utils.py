@@ -5,6 +5,7 @@ import sys
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
+from typing import List, Optional
 
 import torch
 from dataclasses import dataclass
@@ -174,7 +175,36 @@ def generate_matmul_reference(
 
 
 @dataclass
-class MatMulConfig(dict):
+class TraceConfig(dict):
+    """Kwargs passed to `JITFunction.run`"""
+
+    # Launch params
+    num_warps: Optional[int] = None
+    num_stages: Optional[int] = None
+    num_ctas: Optional[int] = None
+    enable_warp_specialization: bool = False
+    enable_fp_fusion: bool = True
+
+    # JIT options
+    do_not_specialize: List[str] = None
+    debug: bool = False
+    noinline: bool = False
+
+    # Additional options
+    extern_libs: List[str] = None
+    stream: Optional[int] = None
+    warmup: bool = False
+
+    # Trace options
+    trace: bool = True
+    trace_dir: Optional[Path] = None
+
+    def __post_init__(self):
+        self.update(self.__dict__)
+
+
+@dataclass
+class MatMulConfig:
     dtype_in: torch.dtype = torch.float16
     dtype_out: torch.dtype = torch.float32
     M: int = 16
@@ -193,18 +223,18 @@ class KernelTracer(ABC):
     KERNEL: str
     COMPILER: AOTCompilerRunner
 
-    def __init__(self, do_not_specialize=None, debug=None, noinline=None):
-        self.jitted_fn = JITFunction(
-            self.KERNEL,
-            do_not_specialize=do_not_specialize,
-            debug=debug,
-            noinline=noinline,
-        )
+    # def __init__(self, do_not_specialize=None, debug=None, noinline=None):
+    #     self.jitted_fn = JITFunction(
+    #         self.KERNEL,
+    #         do_not_specialize=do_not_specialize,
+    #         debug=debug,
+    #         noinline=noinline,
+    #     )
 
-        self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
-        self.arg_names = [p.name for p in self.jitted_fn.params if not p.is_constexpr]
+    #     self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
+    #     self.arg_names = [p.name for p in self.jitted_fn.params if not p.is_constexpr]
 
-        self._initialize_kernel_params()
+    # self._initialize_kernel_params()
 
     def _initialize_kernel_params(self):
         self.args = self.set_args()
@@ -242,20 +272,33 @@ class KernelTracer(ABC):
         """Set grid for the kernel as a callable or a 3-tuple of ints"""
         ...
 
-    def trace(self, **additional_jit_kwargs):
+    def trace(self, kernel_config, trace_config: TraceConfig):
         """Trace a kernel with the given args and constants
 
         Args:
             additional_jit_kwargs: number of warps, specializations, etc. -- see `triton.runtime.jit.JITFunction.run` special args.
         """
-        self.check_args(self.args)
-        self.check_constants(self.constants)
+
+        self.jitted_fn = JITFunction(
+            self.KERNEL,
+            do_not_specialize=trace_config.pop("do_not_specialize"),
+            debug=trace_config.pop("debug"),
+            noinline=trace_config.pop("noinline"),
+        )
+
+        self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
+        self.arg_names = [p.name for p in self.jitted_fn.params if not p.is_constexpr]
+
+        args = self.set_args(kernel_config)
+        self.check_args(args)
+
+        constants = self.set_constants(kernel_config)
+        self.check_constants(constants)
 
         compilation_artifact: CompiledArtifact = self.jitted_fn[self.grid](
-            *self.args.values(),
-            **self.constants,
-            **additional_jit_kwargs,
-            trace=True,
+            *args.values(),
+            **constants,
+            **trace_config,
         )
         return compilation_artifact
 
@@ -271,9 +314,13 @@ class MatMulKernelTracer(KernelTracer):
         noinline=None,
     ):
         self.config = config
+        self.checks = []
         super().__init__(
             do_not_specialize=do_not_specialize, debug=debug, noinline=noinline
         )
+
+    def trace(self, configs: List[MatMulConfig]):
+        pass
 
     def set_args(
         self,
@@ -335,51 +382,49 @@ class MatMulKernelTracer(KernelTracer):
 
 # sys.path.insert(0, KERNELS_DIR)
 
+
 matmul_config_16x16x16 = MatMulConfig()
 matmul_config_256x256x256 = MatMulConfig()
 matmul_config = matmul_config_256x256x256
 do_not_specialize = ["stride_cm, stride_am"]
-matmul_tracer = MatMulKernelTracer(matmul_config)
-artifact = matmul_tracer.trace(num_warps=1)
-# Check
+matmul_tracer = MatMulKernelTracer(matmul_config, do_not_specialize=do_not_specialize)
+
+
+trace_dir = Path("traced_kernels").absolute()
+if not trace_dir.exists():
+    trace_dir.mkdir(parents=True, exist_ok=True)
+
+artifact = matmul_tracer.trace(num_warps=1, trace_dir=trace_dir)
+# Check signatures
 
 expected = matmul_tracer.CHECK
 actual = matmul_tracer.C.detach().cpu()
-# print(f"Expected dtype: {expected.dtype}")
-# print(f"Actual dtype: {actual.dtype}")
-# print(f"Expected shape: {expected.shape}")
-# print(f"Actual shape: {actual.shape}")
-# print(f"Expected avg: {expected.mean()}")
-# print(f"Actual avg: {actual.mean()}")
-# print(f"Expected {expected}")
-# print(f"Actual {actual}")
-
 is_close = torch.allclose(expected, actual, atol=1e-1, rtol=0)
 print(f"Is close {is_close}")
 
 
 # TODO use ordereddict for args
-class AddKernelTracer(KernelTracer):
-    KERNEL = KERNELS_DIR / "add_kernel.py"
+# class AddKernelTracer(KernelTracer):
+#     KERNEL = KERNELS_DIR / "add_kernel.py"
 
-    def __init__(self, dtype, N, BLOCK_SIZE):
-        self.dtype = dtype
-        self.N = N
-        self.BLOCK_SIZE = BLOCK_SIZE
-        super().__init__()
+#     def __init__(self, dtype, N, BLOCK_SIZE):
+#         self.dtype = dtype
+#         self.N = N
+#         self.BLOCK_SIZE = BLOCK_SIZE
+#         super().__init__()
 
-    def set_args(
-        self,
-    ):
-        x = torch.ones(
-            self.N, dtype=self.dtype, device="cuda"
-        )  # torch.rand(size, device="cuda")
-        y = torch.ones(self.N, dtype=self.dtype, device="cuda")
-        output = torch.empty_like(x)
-        return (x, y, output, self.N)
+#     def set_args(
+#         self,
+#     ):
+#         x = torch.ones(
+#             self.N, dtype=self.dtype, device="cuda"
+#         )  # torch.rand(size, device="cuda")
+#         y = torch.ones(self.N, dtype=self.dtype, device="cuda")
+#         output = torch.empty_like(x)
+#         return (x, y, output, self.N)
 
-    def set_constants(self):
-        return {"BLOCK_SIZE": self.BLOCK_SIZE}
+#     def set_constants(self):
+#         return {"BLOCK_SIZE": self.BLOCK_SIZE}
 
-    def set_grid(self):
-        return lambda meta: (triton.cdiv(self.N, meta["BLOCK_SIZE"]),)
+#     def set_grid(self):
+#         return lambda meta: (triton.cdiv(self.N, meta["BLOCK_SIZE"]),)
