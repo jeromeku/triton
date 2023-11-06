@@ -67,9 +67,9 @@ AOT_C_CUDA_Source_Template = AOTTemplate(
 
 
 // helpers to check for cuda errors
-#define CUDA_CHECK(ans) {{\
-    gpuAssert((ans), __FILE__, __LINE__);\
-  }}\
+#define CUDA_CHECK(ans) {{\\
+    gpuAssert((ans), __FILE__, __LINE__);\\
+  }}\\
 
 static inline void gpuAssert(CUresult code, const char *file, int line) {{
   if (code != CUDA_SUCCESS) {{
@@ -79,7 +79,7 @@ static inline void gpuAssert(CUresult code, const char *file, int line) {{
     char err[1024] = {{0}};
     strcat(err, prefix);
     strcat(err, str);
-    printf("%s\\n", err);
+    printf("%s\\\\n", err);
     exit(code);
   }}
 }}

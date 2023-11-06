@@ -13,9 +13,28 @@ from abc import ABC, abstractmethod
 
 
 class AOT_Compiler(ABC):
-    @abstractmethod
+    PARAM_BUILDER_CLS: AOTCompilerParamsBuilder
+
+    def __init__(
+        self,
+        kernel_name,
+        compiled_binary: CompiledKernel,
+        jit_args: JITCompileArgs,
+        jit_fn: JITFunction,
+    ):
+        self.kernel_name = kernel_name
+        self.compiled_binary = compiled_binary
+        self.jit_args = jit_args
+        self.params_builder = self.PARAM_BUILDER_CLS(
+            kernel_name=kernel_name,
+            compiled_binary=compiled_binary,
+            jit_args=jit_args,
+            jit_fn=jit_fn,
+        )
+        self.params = self.build_params()
+
     def build_params(self):
-        ...
+        return self.params_builder.build()
 
     @abstractmethod
     def generate_header(self):
@@ -29,27 +48,7 @@ class AOT_Compiler(ABC):
 class AOT_C_CUDA_Compiler(AOT_Compiler):
     """Creates C CUDA library for accessing Triton jitted kernels"""
 
-    def __init__(
-        self,
-        kernel_name,
-        compiled_binary: CompiledKernel,
-        jit_args: JITCompileArgs,
-        jit_fn: JITFunction,
-        params_builder_cls: AOTCompilerParamsBuilder = AOT_C_CUDA_ParamsBuilder,
-    ):
-        self.kernel_name = kernel_name
-        self.compiled_binary = compiled_binary
-        self.jit_args = jit_args
-        self.params_builder = params_builder_cls(
-            kernel_name=kernel_name,
-            compiled_binary=compiled_binary,
-            jit_args=jit_args,
-            jit_fn=jit_fn,
-        )
-        self.params = self.build_params()
-
-    def build_params(self):
-        return self.params_builder.build()
+    PARAM_BUILDER_CLS = AOT_C_CUDA_ParamsBuilder
 
     def generate_header(self):
         # Filter params for header keys

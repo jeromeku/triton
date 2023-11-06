@@ -98,7 +98,7 @@ def test_aot_compiler_params(dtype, test_data_fn):
 # TODO: Refactor set up code
 @pytest.mark.parametrize(
     "dtype",
-    [torch.float32],
+    [torch.float16],
     ids=lambda x: str(x),
 )
 @pytest.mark.parametrize("test_data_fn", ["ones"])
@@ -123,7 +123,7 @@ def test_aot_compiler_codegen(
     test_kernel = Path(__file__).parent / "fixtures" / "vector_add_kernel.py"
 
     # Set up aot kernel directory
-    test_dir = Path("aot_compilation_codegen_test").absolute()
+    test_dir = Path("aot_compilation_codegen_test_f16").absolute()
     check_dir(test_dir)
 
     test_fn = JITFunction(test_kernel)
@@ -148,10 +148,13 @@ def test_aot_compiler_codegen(
         jit_fn=test_fn,
     )
 
-    header = compiler.generate_source()
+    header = compiler.generate_header()
+
     check_codegen(header, reference_compiler_header)
 
     source = compiler.generate_source()
+    with open(test_dir / "generated_source.cu", "w") as fp:
+        fp.write(source)
     check_codegen(source, reference_compiler_source)
 
 
@@ -190,25 +193,6 @@ def test_aot_linker_header_codegen(
 ):
     actual_header = C_CUDA_header_generator.generate()
     check_codegen(actual_header, reference_header)
-
-
-# def test_aot_linker_header_gen(headers, linker_test_dir, reference_header):
-#     from triton.tools.aot import Linker
-
-#     out_path = linker_test_dir / "kernel"
-#     linker = Linker(headers, out_path=out_path.absolute())
-#     kernels = linker.parse_headers()
-#     header_file, meta = linker.generate_headers(kernels)
-
-#     assert os.path.exists(header_file)
-
-#     with open(header_file, "r") as f:
-#         actual_lines = [line.strip() for line in f]
-
-#     expected_lines = [line.strip() for line in reference_header.split("\n")]
-
-#     for expected, actual in zip(expected_lines, actual_lines):
-#         assert expected == actual
 
 
 def test_aot_linker_func_pointer_defs(

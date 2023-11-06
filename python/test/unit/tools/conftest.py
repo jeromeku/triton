@@ -97,7 +97,7 @@ def parsed_C_CUDA_kernel_metas(headers):
 
 @pytest.fixture
 def reference_compiler_header(headers, fixture_path: Path):
-    if "add_kernel" in any(str(h) for h in headers):
+    if any("add_kernel" in str(h) for h in headers):
         return (fixture_path / "add_kernel.8d4b99fa_0d1d2d3de.h").read_text().strip()
     else:
         raise ValueError(f"Unknown header: {list(headers)}")
@@ -105,7 +105,7 @@ def reference_compiler_header(headers, fixture_path: Path):
 
 @pytest.fixture
 def reference_compiler_source(headers, fixture_path: Path):
-    if "add_kernel" in any(str(h) for h in headers):
+    if any("add_kernel" in str(h) for h in headers):
         return (fixture_path / "add_kernel.8d4b99fa_0d1d2d3de.c").read_text().strip()
     else:
         raise ValueError(f"Unknown header: {list(headers)}")
