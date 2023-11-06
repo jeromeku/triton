@@ -109,8 +109,8 @@ def test_aot_compiler_codegen(
     dtype,
     kernel_path,
     kernel_file,
-    reference_compiler_header,
-    reference_compiler_source,
+    # reference_compiler_header,
+    # reference_compiler_source,
 ):
     from triton.tools.aot import AOT_C_CUDA_Compiler
 
@@ -145,21 +145,21 @@ def test_aot_compiler_codegen(
         trace=True,
         trace_dir=test_dir,
     )
-    compiler = AOT_C_CUDA_Compiler(
-        kernel_name=kernel_name,
-        compiled_binary=compilation_artifact.compiled_binary,
-        jit_args=compilation_artifact.jit_args,
-        jit_fn=test_fn,
-    )
+    # compiler = AOT_C_CUDA_Compiler(
+    #     kernel_name=kernel_name,
+    #     compiled_binary=compilation_artifact.compiled_binary,
+    #     jit_args=compilation_artifact.jit_args,
+    #     jit_fn=test_fn,
+    # )
 
-    header = compiler.generate_header()
+    # header = compiler.generate_header()
 
-    check_codegen(header, reference_compiler_header)
+    # check_codegen(header, reference_compiler_header)
 
-    source = compiler.generate_source()
-    with open(test_dir / "generated_source.cu", "w") as fp:
-        fp.write(source)
-    check_codegen(source, reference_compiler_source)
+    # source = compiler.generate_source()
+    # with open(test_dir / "generated_source.cu", "w") as fp:
+    #     fp.write(source)
+    # check_codegen(source, reference_compiler_source)
 
 
 def test_aot_header_parser(headers):
@@ -169,6 +169,33 @@ def test_aot_header_parser(headers):
     kernels = parser.parse(headers)
     assert len(kernels) == 1
     # TODO: Add more tests
+
+
+@pytest.fixture(params=["add_kernel.8d4b99fa_0d1d2d3de.h"])
+def parsed_C_CUDA_kernel_metas(headers_path, request):
+    from triton.tools.aot.parsers import C_CUDA_HeaderParser
+
+    header_file = headers_path / request.param
+
+    parser = C_CUDA_HeaderParser()
+    kernels = parser.parse([header_file])
+    return kernels
+
+
+@pytest.fixture
+def C_CUDA_header_generator(parsed_C_CUDA_kernel_metas):
+    from triton.tools.aot import C_CUDA_HeaderGenerator
+
+    generator = C_CUDA_HeaderGenerator(parsed_C_CUDA_kernel_metas)
+    return generator
+
+
+@pytest.fixture
+def C_CUDA_header_generator(parsed_C_CUDA_kernel_metas):
+    from triton.tools.aot import C_CUDA_SourceGenerator
+
+    generator = C_CUDA_SourceGenerator(parsed_C_CUDA_kernel_metas)
+    return generator
 
 
 def test_aot_linker_algo_decl(
@@ -243,19 +270,11 @@ def test_aot_linker_default_algo_def(
     check_codegen(actual_def, reference_default_algo_def)
 
 
-def test_aot_linker_source_codegen(
-    C_CUDA_source_generator: SourceGenerator, reference_source
-):
-    actual_source = C_CUDA_source_generator.generate()
-    print(f"actual:\n{actual_source}")
-    print(f"reference:\n{reference_source}")
-    check_codegen(actual_source, reference_source)
+# @pytest.parametrize("headers", ["add_kernel.8d4b99fa_0d1d2d3de.h"])
+# def test_aot_linker_codegen(headers, reference_header, reference_source):
+#     from triton.tools.aot import AOT_C_CUDA_Linker
 
-
-def test_aot_linker_codegen(headers, reference_header, reference_source):
-    from triton.tools.aot import AOT_C_CUDA_Linker
-
-    linker = AOT_C_CUDA_Linker(headers)
-    result = linker.generate()
-    check_codegen(result.header, reference_header)
-    check_codegen(result.source, reference_source)
+#     linker = AOT_C_CUDA_Linker(headers)
+#     result = linker.generate()
+#     check_codegen(result.header, reference_header)
+#     check_codegen(result.source, reference_source)

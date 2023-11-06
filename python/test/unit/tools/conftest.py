@@ -72,18 +72,18 @@ def sources_path(fixture_path):
     return fixture_path / "sources"
 
 
-@pytest.fixture
-def C_CUDA_header_generator(parsed_C_CUDA_kernel_metas):
-    from triton.tools.aot import C_CUDA_HeaderGenerator
+# @pytest.fixture
+# def C_CUDA_header_generator(parsed_C_CUDA_kernel_metas):
+#     from triton.tools.aot import C_CUDA_HeaderGenerator
 
-    return C_CUDA_HeaderGenerator(kernels=parsed_C_CUDA_kernel_metas)
+#     return C_CUDA_HeaderGenerator(kernels=parsed_C_CUDA_kernel_metas)
 
 
-@pytest.fixture
-def C_CUDA_source_generator(parsed_C_CUDA_kernel_metas):
-    from triton.tools.aot import C_CUDA_SourceGenerator
+# @pytest.fixture
+# def C_CUDA_source_generator(parsed_C_CUDA_kernel_metas):
+#     from triton.tools.aot import C_CUDA_SourceGenerator
 
-    return C_CUDA_SourceGenerator(kernels=parsed_C_CUDA_kernel_metas)
+#     return C_CUDA_SourceGenerator(kernels=parsed_C_CUDA_kernel_metas)
 
 
 @pytest.fixture
@@ -93,17 +93,19 @@ def reference_compiler_params(fixture_path):
 
 
 @pytest.fixture
-def headers(fixture_path):
-    return list(fixture_path.glob("*.h"))
+def headers(headers_path):
+    return list(headers_path.glob("*.h"))
 
 
-@pytest.fixture
-def parsed_C_CUDA_kernel_metas(headers):
-    from triton.tools.aot.parsers import C_CUDA_HeaderParser
+# @pytest.fixture(params=["add_kernel.8d4b99fa_0d1d2d3de.h"])
+# def parsed_C_CUDA_kernel_metas(headers_path, request):
+#     from triton.tools.aot.parsers import C_CUDA_HeaderParser
 
-    parser = C_CUDA_HeaderParser()
-    kernels = parser.parse(headers)
-    return kernels
+#     header_file = headers_path / request.param
+
+#     parser = C_CUDA_HeaderParser()
+#     kernels = parser.parse([header_file])
+#     return kernels
 
 
 # --- Reference codegen fixtures ---#
