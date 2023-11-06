@@ -295,7 +295,8 @@ class KernelTracer(ABC):
             debug=debug,
             noinline=noinline,
         )
-        self.check_specializations(jitted_fn.params, do_not_specialize)
+        if do_not_specialize:
+            self.check_specializations(jitted_fn.params, do_not_specialize)
 
         expected_constants = [p.name for p in jitted_fn.params if p.is_constexpr]
         expected_args = [p.name for p in jitted_fn.params if not p.is_constexpr]
@@ -406,20 +407,32 @@ class MatMulKernelTracer(KernelTracer):
 
 
 # sys.path.insert(0, KERNELS_DIR)
+import itertools
+import shutil
 
+trace_dir = Path("traced_kernels").absolute()
+if trace_dir.exists():
+    shutil.rmtree(trace_dir)
+trace_dir.mkdir(parents=True, exist_ok=True)
 
-matmul_config_16x16x16 = MatMulConfig()
-matmul_config_256x256x256 = MatMulConfig()
-matmul_config = matmul_config_256x256x256
-trace_config = TraceConfig(do_not_specialize=["stride_cm", "stride_am"])
+trace_configs = []
+specializations = [("stride_cm", "stride_am"), ("stride_cm",), ("stride_am",)]
+
+for spec in specializations:
+    trace_configs.append(TraceConfig(do_not_specialize=spec, trace_dir=trace_dir))
+
+trace_configs.append(TraceConfig())
+
+# matmul_config_16x16x16 = MatMulConfig()
+matmul_config = MatMulConfig()  # 16 x 16 x 16
 matmul_tracer = MatMulKernelTracer()
 
 
-trace_dir = Path("traced_kernels").absolute()
-if not trace_dir.exists():
-    trace_dir.mkdir(parents=True, exist_ok=True)
+kernel_configs = [matmul_config] * len(trace_configs)
 
-traces, outputs, checks = matmul_tracer.trace([matmul_config], [trace_config])
+traces, outputs, checks = matmul_tracer.trace(
+    kernel_configs=kernel_configs, trace_configs=trace_configs
+)
 # Check signatures
 
 for actual, expected in zip(outputs, checks):
