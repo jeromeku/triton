@@ -6,14 +6,18 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import torch
+from dataclasses import dataclass
 
 import triton
+import triton.language as tl
 from triton.runtime.jit import JITFunction
 from triton.tools.aot import CompiledArtifact, JITCompileArgs
 
 """
 Utilities for generating reference AOT kernels 
 """
+
+KERNELS_DIR = Path(__file__).parent / "fixtures" / "kernels"
 
 
 def generate_reference_specs():
@@ -65,7 +69,7 @@ class AOTCompilerRunner:
         pass
 
 
-class KernelTracer:
+class KernelTracer(ABC):
     KERNEL: str
     COMPILER: AOTCompilerRunner
 
@@ -162,7 +166,7 @@ def add_kernel(
 
 
 class AddKernelTracer(KernelTracer):
-    KERNEL = Path(__file__).parent / "fixtures" / "kernels" / "add_kernel.py"
+    KERNEL = KERNELS_DIR / "add_kernel.py"
 
     def __init__(self, dtype, N, BLOCK_SIZE):
         self.dtype = dtype
@@ -278,11 +282,116 @@ def generate_matmul_reference(
     link_aot_kernels(out_dir, "matmul")
 
 
-MATMUL_KERNEL = (
-    Path(__file__).parent.absolute() / "fixtures" / "kernels" / "matmul_kernel.py"
-)
-OUT_DIR = Path("aot_matmul_ref").absolute()
-if not OUT_DIR.exists():
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+# MATMUL_KERNEL = KERNELS_DIR / "matmul_kernel.py"
+# OUT_DIR = Path("aot_matmul_ref").absolute()
+# if not OUT_DIR.exists():
+#     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-generate_matmul_reference(MATMUL_KERNEL, OUT_DIR)
+# generate_matmul_reference(MATMUL_KERNEL, OUT_DIR)
+# TODO: replicate refernece matmul kernel
+# Cases: stride_cm: specialize (16) / no specialize
+#        stride_am: specialize (16) / no specialize
+# Pass do_not_specialize to jit function by param name
+
+
+@dataclass
+class MatMulConfig(dict):
+    dtype_in: torch.dtype = torch.float16
+    dtype_out: torch.dtype = torch.float32
+    M: int = 16
+    N: int = 16
+    K: int = 16
+    BLOCK_M: tl.constexpr = 16
+    BLOCK_N: tl.constexpr = 16
+    BLOCK_K: tl.constexpr = 16
+    seed: torch.seed = 0
+
+    def __post_init__(self):
+        self.update(self.__dict__)
+
+
+class MatMulKernelTracer(KernelTracer):
+    KERNEL = KERNELS_DIR / "matmul_kernel.py"
+
+    def __init__(self, **config):
+        self.config = MatMulConfig(**config)
+        super().__init__()
+
+    def set_args(
+        self,
+    ):
+        # Set up matrices
+        torch.manual_seed(self.config.seed)
+
+        A_shape = self.config.M, self.config.K
+        B_shape = self.config.K, self.config.N
+        C_shape = self.config.M, self.config.N
+        A = torch.randn(A_shape, dtype=self.config.dtype_in, device="cuda").contiguous()
+        B = torch.randn(B_shape, dtype=self.config.dtype_in, device="cuda").contiguous()
+        C = torch.empty(C_shape, dtype=self.config.dtype_out, device="cuda")
+
+        # Save for verification
+        self.CHECK = torch.matmul(A, B).to(self.config.dtype_out).detach().cpu()
+        self.C = C
+        M, K = A.shape
+        _, N = B.shape
+
+        stride_cm = C.stride(0)
+        stride_cn = C.stride(1)
+        stride_am = A.stride(0)
+        stride_ak = A.stride(1)
+        stride_bk = B.stride(0)
+        stride_bn = B.stride(1)
+
+        args = (
+            C,
+            A,
+            B,
+            M,
+            N,
+            K,
+            stride_cm,
+            stride_cn,
+            stride_am,
+            stride_ak,
+            stride_bk,
+            stride_bn,
+        )
+
+        return args
+
+    def set_constants(self):
+        return {
+            "BLOCK_M": self.config.BLOCK_M,
+            "BLOCK_N": self.config.BLOCK_N,
+            "BLOCK_K": self.config.BLOCK_K,
+        }
+
+    def set_grid(self):
+        grid = lambda META: (
+            triton.cdiv(self.config.M, META["BLOCK_M"])
+            * triton.cdiv(self.config.N, META["BLOCK_N"]),
+        )
+        return grid
+
+
+# sys.path.insert(0, KERNELS_DIR)
+
+matmul_config = MatMulConfig()
+matmul_tracer = MatMulKernelTracer(**matmul_config)
+artifact = matmul_tracer.trace(num_warps=1)
+# Check
+
+expected = matmul_tracer.CHECK
+actual = matmul_tracer.C.detach().cpu()
+print(f"Expected dtype: {expected.dtype}")
+print(f"Actual dtype: {actual.dtype}")
+print(f"Expected shape: {expected.shape}")
+print(f"Actual shape: {actual.shape}")
+print(f"Expected avg: {expected.mean()}")
+print(f"Actual avg: {actual.mean()}")
+print(f"Expected {expected}")
+print(f"Actual {actual}")
+
+is_close = torch.allclose(expected, actual, atol=1e-1, rtol=0)
+print(f"Is close {is_close}")

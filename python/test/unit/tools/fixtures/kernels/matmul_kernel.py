@@ -1,4 +1,4 @@
-import kernel_utils
+# import kernel_utils
 
 import triton
 import triton.language as tl
@@ -43,7 +43,8 @@ def kernel(
         a_ptrs += BLOCK_K * stride_ak
         b_ptrs += BLOCK_K * stride_bk
 
-    c = kernel_utils.mul(accumulator, accumulator)
+    c = accumulator.to(tl.float32)
+    # c = kernel_utils.mul(accumulator, accumulator)
     # Write back the block of the output matrix C with masks.
     offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
