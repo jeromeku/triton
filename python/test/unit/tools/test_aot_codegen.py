@@ -166,10 +166,10 @@ def test_aot_compiler_codegen(
 
     check_codegen(header, reference_header)
 
-    # source = compiler.generate_source()
+    source = compiler.generate_source()
     # with open(test_dir / "generated_source.cu", "w") as fp:
     #     fp.write(source)
-    # check_codegen(source, reference_compiler_source)
+    check_codegen(source, reference_source)
 
 
 def test_aot_header_parser(headers):
