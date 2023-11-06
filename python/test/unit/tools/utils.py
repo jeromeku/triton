@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from pathlib import Path
 
 import torch
@@ -67,128 +68,6 @@ class AOTCompilerRunner:
 
     def _preprocess_jit_args(self, jit_args):
         pass
-
-
-class KernelTracer(ABC):
-    KERNEL: str
-    COMPILER: AOTCompilerRunner
-
-    def __init__(self, do_not_specialize=None, debug=None, noinline=None):
-        self.jitted_fn = JITFunction(
-            self.KERNEL,
-            do_not_specialize=do_not_specialize,
-            debug=debug,
-            noinline=noinline,
-        )
-
-        self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
-        self.arg_names = [p.name for p in self.jitted_fn.params if not p.is_constexpr]
-
-        self._initialize_kernel_params()
-
-    def _initialize_kernel_params(self):
-        self.args = self.set_args()
-        self.constants = self.set_constants()
-        self.grid = self.set_grid()
-
-    def check_args(self, kernel_args):
-        assert len(kernel_args) == len(
-            self.arg_names
-        ), f"Incorrect number of args, expected {self.arg_names}"
-
-    def check_constants(self, kernel_constants):
-        assert set(kernel_constants.keys()) == set(
-            self.constant_names
-        ), f"Incorrect constants, expected {self.constant_names}"
-
-    @abstractmethod
-    def set_args(self):
-        """Set args for the kernel as a tuple
-
-        **Order matters!**
-        """
-        ...
-
-    @abstractmethod
-    def set_constants(self):
-        """Set constants for the kernel as a dict"""
-        ...
-
-    @abstractmethod
-    def set_grid(self):
-        """Set grid for the kernel as a callable or a 3-tuple of ints"""
-        ...
-
-    def trace(self, **additional_jit_kwargs):
-        """Trace a kernel with the given args and constants
-
-        Args:
-            additional_jit_kwargs: number of warps, specializations, etc. -- see `triton.runtime.jit.JITFunction.run` special args.
-        """
-        self.check_args(self.args)
-        self.check_constants(self.constants)
-
-        compilation_artifact: CompiledArtifact = self.jitted_fn[self.grid](
-            *self.args,
-            **self.constants,
-            **additional_jit_kwargs,
-            trace=True,
-        )
-        return compilation_artifact
-
-
-ADD_KERNEL = """
-#From Triton vector_add_kernel tutorial
-import triton
-import triton.language as tl
-
-@triton.jit
-def add_kernel(
-    x_ptr,  
-    y_ptr,  
-    output_ptr,
-    n_elements,
-    BLOCK_SIZE: tl.constexpr,
-):
-    pid = tl.program_id(axis=0)
-
-    block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE)
-
-    mask = offsets < n_elements
-
-    x = tl.load(x_ptr + offsets, mask=mask)
-    y = tl.load(y_ptr + offsets, mask=mask)
-    output = x + y
-
-    tl.store(output_ptr + offsets, output, mask=mask)
-"""
-
-
-class AddKernelTracer(KernelTracer):
-    KERNEL = KERNELS_DIR / "add_kernel.py"
-
-    def __init__(self, dtype, N, BLOCK_SIZE):
-        self.dtype = dtype
-        self.N = N
-        self.BLOCK_SIZE = BLOCK_SIZE
-        super().__init__()
-
-    def set_args(
-        self,
-    ):
-        x = torch.ones(
-            self.N, dtype=self.dtype, device="cuda"
-        )  # torch.rand(size, device="cuda")
-        y = torch.ones(self.N, dtype=self.dtype, device="cuda")
-        output = torch.empty_like(x)
-        return (x, y, output, self.N)
-
-    def set_constants(self):
-        return {"BLOCK_SIZE": self.BLOCK_SIZE}
-
-    def set_grid(self):
-        return lambda meta: (triton.cdiv(self.N, meta["BLOCK_SIZE"]),)
 
 
 # add_kernel_tracer = AddKernelTracer(dtype=torch.float16, N=1024, BLOCK_SIZE=1024)
@@ -310,6 +189,77 @@ class MatMulConfig(dict):
         self.update(self.__dict__)
 
 
+class KernelTracer(ABC):
+    KERNEL: str
+    COMPILER: AOTCompilerRunner
+
+    def __init__(self, do_not_specialize=None, debug=None, noinline=None):
+        self.jitted_fn = JITFunction(
+            self.KERNEL,
+            do_not_specialize=do_not_specialize,
+            debug=debug,
+            noinline=noinline,
+        )
+
+        self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
+        self.arg_names = [p.name for p in self.jitted_fn.params if not p.is_constexpr]
+
+        self._initialize_kernel_params()
+
+    def _initialize_kernel_params(self):
+        self.args = self.set_args()
+        self.constants = self.set_constants()
+        self.grid = self.set_grid()
+
+    def check_args(self, kernel_args):
+        assert len(kernel_args) == len(
+            self.arg_names
+        ), f"Incorrect number of args, expected {self.arg_names}"
+        for i, (expected_key, actual_key) in enumerate(
+            zip(self.arg_names, kernel_args.keys())
+        ):
+            assert (
+                expected_key == actual_key
+            ), f"Incorrect arg name at position {i}, expected {expected_key}, got {actual_key}"
+
+    def check_constants(self, kernel_constants):
+        assert set(kernel_constants.keys()) == set(
+            self.constant_names
+        ), f"Incorrect constants, expected {self.constant_names}"
+
+    @abstractmethod
+    def set_args(self):
+        """Set args for the kernel as an OrderedDict"""
+        ...
+
+    @abstractmethod
+    def set_constants(self):
+        """Set constants for the kernel as a dict"""
+        ...
+
+    @abstractmethod
+    def set_grid(self):
+        """Set grid for the kernel as a callable or a 3-tuple of ints"""
+        ...
+
+    def trace(self, **additional_jit_kwargs):
+        """Trace a kernel with the given args and constants
+
+        Args:
+            additional_jit_kwargs: number of warps, specializations, etc. -- see `triton.runtime.jit.JITFunction.run` special args.
+        """
+        self.check_args(self.args)
+        self.check_constants(self.constants)
+
+        compilation_artifact: CompiledArtifact = self.jitted_fn[self.grid](
+            *self.args.values(),
+            **self.constants,
+            **additional_jit_kwargs,
+            trace=True,
+        )
+        return compilation_artifact
+
+
 class MatMulKernelTracer(KernelTracer):
     KERNEL = KERNELS_DIR / "matmul_kernel.py"
 
@@ -343,19 +293,19 @@ class MatMulKernelTracer(KernelTracer):
         stride_bk = B.stride(0)
         stride_bn = B.stride(1)
 
-        args = (
-            C,
-            A,
-            B,
-            M,
-            N,
-            K,
-            stride_cm,
-            stride_cn,
-            stride_am,
-            stride_ak,
-            stride_bk,
-            stride_bn,
+        args = OrderedDict(
+            C=C,
+            A=A,
+            B=B,
+            M=M,
+            N=N,
+            K=K,
+            stride_cm=stride_cm,
+            stride_cn=stride_cn,
+            stride_am=stride_am,
+            stride_ak=stride_ak,
+            stride_bk=stride_bk,
+            stride_bn=stride_bn,
         )
 
         return args
@@ -395,3 +345,30 @@ print(f"Actual {actual}")
 
 is_close = torch.allclose(expected, actual, atol=1e-1, rtol=0)
 print(f"Is close {is_close}")
+
+
+# TODO use ordereddict for args
+class AddKernelTracer(KernelTracer):
+    KERNEL = KERNELS_DIR / "add_kernel.py"
+
+    def __init__(self, dtype, N, BLOCK_SIZE):
+        self.dtype = dtype
+        self.N = N
+        self.BLOCK_SIZE = BLOCK_SIZE
+        super().__init__()
+
+    def set_args(
+        self,
+    ):
+        x = torch.ones(
+            self.N, dtype=self.dtype, device="cuda"
+        )  # torch.rand(size, device="cuda")
+        y = torch.ones(self.N, dtype=self.dtype, device="cuda")
+        output = torch.empty_like(x)
+        return (x, y, output, self.N)
+
+    def set_constants(self):
+        return {"BLOCK_SIZE": self.BLOCK_SIZE}
+
+    def set_grid(self):
+        return lambda meta: (triton.cdiv(self.N, meta["BLOCK_SIZE"]),)
