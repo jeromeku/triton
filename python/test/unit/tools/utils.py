@@ -285,4 +285,4 @@ OUT_DIR = Path("aot_matmul_ref").absolute()
 if not OUT_DIR.exists():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-generate_matmul_reference(MATMUL_KERNEL, OUT_DIR, BM=16, BN=16, BK=16, hints=[":16"])
+generate_matmul_reference(MATMUL_KERNEL, OUT_DIR)
