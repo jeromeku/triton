@@ -71,8 +71,9 @@ class KernelTracer:
             debug=debug,
             noinline=noinline,
         )
-        self.arg_names = self.jitted_fn.arg_names
+
         self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
+        self.arg_names = [p.name for p in self.jitted_fn.params if not p.is_constexpr]
 
         self._initialize_kernel_params()
 
@@ -82,14 +83,21 @@ class KernelTracer:
         self.grid = self.set_grid()
 
     def check_args(self, kernel_args):
-        assert len(kernel_args) == len(self.arg_names)
+        assert len(kernel_args) == len(
+            self.arg_names
+        ), f"Incorrect number of args, expected {self.arg_names}"
 
     def check_constants(self, kernel_constants):
-        assert set(kernel_constants.keys()) == set(self.jitted_fn.constant_names)
+        assert set(kernel_constants.keys()) == set(
+            self.constant_names
+        ), f"Incorrect constants, expected {self.constant_names}"
 
     @abstractmethod
     def set_args(self):
-        """Set args for the kernel as a tuple"""
+        """Set args for the kernel as a tuple
+
+        **Order matters!**
+        """
         ...
 
     @abstractmethod
@@ -116,7 +124,6 @@ class KernelTracer:
             **self.constants,
             **additional_jit_kwargs,
             trace=True,
-            trace_dir=self.save_path,
         )
         return compilation_artifact
 
@@ -150,7 +157,7 @@ def add_kernel(
 
 
 class AddKernelTracer(KernelTracer):
-    KERNEL = ADD_KERNEL
+    KERNEL = Path(__file__).parent / "fixtures" / "kernels" / "add_kernel.py"
 
     def __init__(self, dtype, N, BLOCK_SIZE):
         self.dtype = dtype
@@ -166,7 +173,7 @@ class AddKernelTracer(KernelTracer):
         )  # torch.rand(size, device="cuda")
         y = torch.ones(self.N, dtype=self.dtype, device="cuda")
         output = torch.empty_like(x)
-        return x, y, output, self.N
+        return (x, y, output, self.N)
 
     def set_constants(self):
         return {"BLOCK_SIZE": self.BLOCK_SIZE}
@@ -175,39 +182,6 @@ class AddKernelTracer(KernelTracer):
         return lambda meta: (triton.cdiv(self.N, meta["BLOCK_SIZE"]),)
 
 
-def trace_add_kernel(kernel_path):
-    """Automatically generate parameters for AOT compilation by kernel tracing
+add_kernel_tracer = AddKernelTracer(dtype=torch.float16, N=1024, BLOCK_SIZE=1024)
 
-    Args:
-        kernel_path (str | Path): path to the kernel file
-    """
-    N = 1024
-    BLOCK_SIZE = 1024
-    NUM_WARPS = 4
-    seed = 0
-    dtype = torch.float16
-
-    torch.manual_seed(seed)
-    x = torch.ones(N, dtype=dtype, device="cuda")  # torch.rand(size, device="cuda")
-    y = torch.ones(N, dtype=dtype, device="cuda")
-
-    # Set up aot kernel directory
-    test_dir = Path("aot_compilation_spec_test").absolute()
-    check_dir(test_dir)
-
-    test_fn = JITFunction(test_kernel)
-    kernel_name = test_fn.__name__
-    output = torch.empty_like(x)
-    grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
-
-    # Run aot jit
-    compilation_artifact: CompiledArtifact = test_fn[grid](
-        x,
-        y,
-        output,
-        N,
-        BLOCK_SIZE=BLOCK_SIZE,
-        num_warps=NUM_WARPS,
-        trace=True,
-        trace_dir=test_dir,
-    )
+add_kernel_tracer.trace()
