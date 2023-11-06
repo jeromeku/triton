@@ -99,18 +99,25 @@ def test_aot_compiler_params(kernel_path, dtype, kernel_file):
         ), f"Key: {k}\nExpected: {expected_spec[k]}\nActual: {actual_spec[k]}"
 
 
-@pytest.mark.parametrize("kernel_file", ["add_kernel.py"])
 @pytest.mark.parametrize(
-    "dtype",
-    [torch.float16],
-    ids=lambda x: str(x),
+    "dtype, kernel_file, header_file, source_file",
+    [
+        (
+            torch.float16,
+            "add_kernel.py",
+            "add_kernel.8d4b99fa_0d1d2d3de.h",
+            "add_kernel.8d4b99fa_0d1d2d3de.c",
+        ),
+    ],
 )
 def test_aot_compiler_codegen(
     dtype,
-    kernel_path,
-    kernel_file,
-    # reference_compiler_header,
-    # reference_compiler_source,
+    kernel_file: str,
+    header_file: str,
+    source_file: str,
+    kernel_path: Path,
+    headers_path: Path,
+    sources_path: Path,
 ):
     from triton.tools.aot import AOT_C_CUDA_Compiler
 
@@ -126,8 +133,11 @@ def test_aot_compiler_codegen(
 
     test_kernel = kernel_path / kernel_file
 
+    reference_header = (headers_path / header_file).read_text()
+    reference_source = (sources_path / source_file).read_text()
+
     # Set up aot kernel directory
-    test_dir = Path("aot_compilation_codegen_test_f16").absolute()
+    test_dir = Path("aot_compilation_tests").absolute()
     check_dir(test_dir)
 
     test_fn = JITFunction(test_kernel)
@@ -145,16 +155,16 @@ def test_aot_compiler_codegen(
         trace=True,
         trace_dir=test_dir,
     )
-    # compiler = AOT_C_CUDA_Compiler(
-    #     kernel_name=kernel_name,
-    #     compiled_binary=compilation_artifact.compiled_binary,
-    #     jit_args=compilation_artifact.jit_args,
-    #     jit_fn=test_fn,
-    # )
+    compiler = AOT_C_CUDA_Compiler(
+        kernel_name=kernel_name,
+        compiled_binary=compilation_artifact.compiled_binary,
+        jit_args=compilation_artifact.jit_args,
+        jit_fn=test_fn,
+    )
 
-    # header = compiler.generate_header()
+    header = compiler.generate_header()
 
-    # check_codegen(header, reference_compiler_header)
+    check_codegen(header, reference_header)
 
     # source = compiler.generate_source()
     # with open(test_dir / "generated_source.cu", "w") as fp:
