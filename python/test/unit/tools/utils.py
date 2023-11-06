@@ -62,20 +62,24 @@ def generate_reference_specs():
 
 
 class KernelTracer:
-    KERNEL_PATH: (str | Path)
+    KERNEL: str
 
-    def __init__(
-        self, kernel_path, save_path, do_not_specialize=None, debug=None, noinline=None
-    ):
+    def __init__(self, do_not_specialize=None, debug=None, noinline=None):
         self.jitted_fn = JITFunction(
-            self.KERNEL_PATH,
+            self.KERNEL,
             do_not_specialize=do_not_specialize,
             debug=debug,
             noinline=noinline,
         )
         self.arg_names = self.jitted_fn.arg_names
         self.constant_names = [p.name for p in self.jitted_fn.params if p.is_constexpr]
-        self.save_path = save_path
+
+        self._initialize_kernel_params()
+
+    def _initialize_kernel_params(self):
+        self.args = self.set_args()
+        self.constants = self.set_constants()
+        self.grid = self.set_grid()
 
     def check_args(self, kernel_args):
         assert len(kernel_args) == len(self.arg_names)
@@ -83,28 +87,92 @@ class KernelTracer:
     def check_constants(self, kernel_constants):
         assert set(kernel_constants.keys()) == set(self.jitted_fn.constant_names)
 
-    def trace(
-        self, kernel_args_tup, kernel_constants_map, *, grid, **additional_jit_kwargs
-    ):
+    @abstractmethod
+    def set_args(self):
+        """Set args for the kernel as a tuple"""
+        ...
+
+    @abstractmethod
+    def set_constants(self):
+        """Set constants for the kernel as a dict"""
+        ...
+
+    @abstractmethod
+    def set_grid(self):
+        """Set grid for the kernel as a callable or a 3-tuple of ints"""
+        ...
+
+    def trace(self, **additional_jit_kwargs):
         """Trace a kernel with the given args and constants
 
         Args:
-            kernel_args_tup (tuple): tuple of kernel arguments
-            kernel_constants_map (dict): dictionary of kernel constants
-            grid (callable): callable that returns the grid size
             additional_jit_kwargs: number of warps, specializations, etc. -- see `triton.runtime.jit.JITFunction.run` special args.
         """
-        self.check_args(kernel_args_tup)
-        self.check_constants(kernel_constants_map)
+        self.check_args(self.args)
+        self.check_constants(self.constants)
 
-        compilation_artifact: CompiledArtifact = self.jitted_fn[grid](
-            *kernel_args_tup,
-            **kernel_constants_map,
+        compilation_artifact: CompiledArtifact = self.jitted_fn[self.grid](
+            *self.args,
+            **self.constants,
             **additional_jit_kwargs,
             trace=True,
             trace_dir=self.save_path,
         )
         return compilation_artifact
+
+
+ADD_KERNEL = """
+#From Triton vector_add_kernel tutorial
+import triton
+import triton.language as tl
+
+@triton.jit
+def add_kernel(
+    x_ptr,  
+    y_ptr,  
+    output_ptr,
+    n_elements,
+    BLOCK_SIZE: tl.constexpr,
+):
+    pid = tl.program_id(axis=0)
+
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+
+    mask = offsets < n_elements
+
+    x = tl.load(x_ptr + offsets, mask=mask)
+    y = tl.load(y_ptr + offsets, mask=mask)
+    output = x + y
+
+    tl.store(output_ptr + offsets, output, mask=mask)
+"""
+
+
+class AddKernelTracer(KernelTracer):
+    KERNEL = ADD_KERNEL
+
+    def __init__(self, dtype, N, BLOCK_SIZE):
+        self.dtype = dtype
+        self.N = N
+        self.BLOCK_SIZE = BLOCK_SIZE
+        super().__init__()
+
+    def set_args(
+        self,
+    ):
+        x = torch.ones(
+            self.N, dtype=self.dtype, device="cuda"
+        )  # torch.rand(size, device="cuda")
+        y = torch.ones(self.N, dtype=self.dtype, device="cuda")
+        output = torch.empty_like(x)
+        return x, y, output, self.N
+
+    def set_constants(self):
+        return {"BLOCK_SIZE": self.BLOCK_SIZE}
+
+    def set_grid(self):
+        return lambda meta: (triton.cdiv(self.N, meta["BLOCK_SIZE"]),)
 
 
 def trace_add_kernel(kernel_path):
