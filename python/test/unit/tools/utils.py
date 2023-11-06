@@ -9,51 +9,11 @@ import torch
 
 import triton
 from triton.runtime.jit import JITFunction
-from triton.tools.aot import CompiledArtifact
+from triton.tools.aot import CompiledArtifact, JITCompileArgs
 
 """
 Utilities for generating reference AOT kernels 
 """
-
-
-def _compile_kernel(
-    dir, signature, kernel_name, out_name, out_path, num_warps, grid, kernel_path
-):
-    compiler_path = os.path.join(triton.tools.__path__[0], "compile.py")
-
-    subprocess.run(
-        [
-            sys.executable,
-            compiler_path,
-            "-n",
-            kernel_name,
-            "--signature",
-            signature,
-            "--out-name",
-            out_name,
-            "-o",
-            out_path,
-            "-w",
-            str(num_warps),
-            "-g",
-            grid,
-            kernel_path,
-        ],
-        check=True,
-        cwd=dir,
-    )
-
-
-def link_aot_kernels(kernel_header_path, kernel_name):
-    linker_path = os.path.join(triton.tools.__path__[0], "link.py")
-
-    # link all desired configs
-    h_files = glob.glob(os.path.join(kernel_header_path, "*.h"))
-    subprocess.run(
-        [sys.executable, linker_path] + h_files + ["-o", kernel_name],
-        check=True,
-        cwd=kernel_header_path,
-    )
 
 
 def generate_reference_specs():
@@ -61,8 +21,53 @@ def generate_reference_specs():
     pass
 
 
+class AOTCompilerRunner:
+    def __init__(self):
+        self.compiler_path = os.path.join(triton.tools.__path__[0], "compile.py")
+
+    def compile_kernel(
+        self,
+        kernel_dir,
+        signature,
+        kernel_name,
+        out_name,
+        out_path,
+        num_warps,
+        num_stages,
+        grid,
+        kernel_path,
+    ):
+        subprocess.run(
+            [
+                sys.executable,
+                self.compiler_path,
+                "-n",
+                kernel_name,
+                "--signature",
+                signature,
+                "--out-name",
+                out_name,
+                "-o",
+                out_path,
+                "-w",
+                str(num_warps),
+                "-ns",
+                str(num_stages),
+                "-g",
+                grid,
+                kernel_path,
+            ],
+            check=True,
+            cwd=kernel_dir,
+        )
+
+    def _preprocess_jit_args(self, jit_args):
+        pass
+
+
 class KernelTracer:
     KERNEL: str
+    COMPILER: AOTCompilerRunner
 
     def __init__(self, do_not_specialize=None, debug=None, noinline=None):
         self.jitted_fn = JITFunction(
@@ -182,6 +187,102 @@ class AddKernelTracer(KernelTracer):
         return lambda meta: (triton.cdiv(self.N, meta["BLOCK_SIZE"]),)
 
 
-add_kernel_tracer = AddKernelTracer(dtype=torch.float16, N=1024, BLOCK_SIZE=1024)
+# add_kernel_tracer = AddKernelTracer(dtype=torch.float16, N=1024, BLOCK_SIZE=1024)
 
-add_kernel_tracer.trace()
+# artifact = add_kernel_tracer.trace()
+# for k, v in artifact.jit_args.items():
+#     print(f"{k}: {v}")
+
+
+def _compile_kernel(
+    dir, signature, kernel_name, out_name, out_path, num_warps, grid, kernel_path
+):
+    compiler_path = os.path.join(triton.tools.__path__[0], "compile.py")
+
+    subprocess.run(
+        [
+            sys.executable,
+            compiler_path,
+            "-n",
+            kernel_name,
+            "--signature",
+            signature,
+            "--out-name",
+            out_name,
+            "-o",
+            out_path,
+            "-w",
+            str(num_warps),
+            "-g",
+            grid,
+            kernel_path,
+        ],
+        check=True,
+        cwd=dir,
+    )
+
+
+# Edge case kernel with no specialization
+# def compile_aot_kernel_no_specialization(dir, kernel_path, dtype, BM, BN, BK):
+#     # compile all desired configs
+#     sig = f"*fp32, *{dtype}, *{dtype}, i32, i32, i32, i32, i32, i32, i32, i32, i32, {BM}, {BN}, {BK}"
+#     name = f"matmul_{dtype}"
+#     grid = f"M/{BM}, N/{BN}, 1"
+#     _compile_kernel(
+#         dir=dir,
+#         signature=sig,
+#         kernel_name="kernel",
+#         out_name=name,
+#         out_path=name,
+#         num_warps=1,
+#         grid=grid,
+#         kernel_path=kernel_path,
+#     )
+
+
+def compile_aot_kernels(dir, kernel_path, dtype, BM, BN, BK, ha_hb_hints):
+    # compile all desired configs
+    for ha in ha_hb_hints:
+        for hb in ha_hb_hints:
+            sig = f"*fp32:16, *{dtype}:16, *{dtype}:16, i32, i32, i32, i32{ha}, i32:1, i32{hb}, i32:1, i32:16, i32:1, {BM}, {BN}, {BK}"
+            name = f"matmul_{dtype}"
+            grid = f"M/{BM}, N/{BN}, 1"
+            _compile_kernel(
+                dir=dir,
+                signature=sig,
+                kernel_name="kernel",
+                out_name=name,
+                out_path=name,
+                num_warps=1,
+                grid=grid,
+                kernel_path=kernel_path,
+            )
+
+
+def link_aot_kernels(dir, kernel_name):
+    linker_path = os.path.join(triton.tools.__path__[0], "link.py")
+
+    # link all desired configs
+    h_files = glob.glob(os.path.join(dir, "*.h"))
+    subprocess.run(
+        [sys.executable, linker_path] + h_files + ["-o", kernel_name],
+        check=True,
+        cwd=dir,
+    )
+
+
+def generate_matmul_reference(
+    kernel_path, out_dir, BM=16, BN=16, BK=16, hints=["", ":16"], dtype="fp16"
+):
+    compile_aot_kernels(out_dir, kernel_path, dtype, BM, BN, BK, hints)
+    link_aot_kernels(out_dir, "matmul")
+
+
+MATMUL_KERNEL = (
+    Path(__file__).parent.absolute() / "fixtures" / "kernels" / "matmul_kernel.py"
+)
+OUT_DIR = Path("aot_matmul_ref").absolute()
+if not OUT_DIR.exists():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+generate_matmul_reference(MATMUL_KERNEL, OUT_DIR, BM=16, BN=16, BK=16, hints=[":16"])
