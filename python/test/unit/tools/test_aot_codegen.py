@@ -39,13 +39,19 @@ def check_dir(dir):
     return dir
 
 
-@pytest.mark.parametrize("kernel_file", ["add_kernel.py"])
+# Remove?
 @pytest.mark.parametrize(
-    "dtype",
-    [torch.float16],
-    ids=lambda x: str(x),
+    "dtype, kernel_file, header_file, source_file",
+    [
+        (
+            torch.float16,
+            "add_kernel.py",
+            "add_kernel.8d4b99fa_0d1d2d3de.h",
+            "add_kernel.8d4b99fa_0d1d2d3de.c",
+        ),
+    ],
 )
-def test_aot_compiler_params(kernel_path, dtype, kernel_file):
+def test_aot_compiler_params(dtype, kernel_file, kernel_path: Path):
     N = 1024
     BLOCK_SIZE = 1024
     NUM_WARPS = 4
@@ -60,12 +66,12 @@ def test_aot_compiler_params(kernel_path, dtype, kernel_file):
     # Set up aot kernel directory
     test_dir = Path("aot_compilation_spec_test").absolute()
     check_dir(test_dir)
-    from triton.runtime.jit import JITFunction
 
     test_fn = JITFunction(test_kernel)
     kernel_name = test_fn.__name__
     output = torch.empty_like(x)
     grid = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
+
     # Run aot jit
     compilation_artifact: CompiledArtifact = test_fn[grid](
         x,
