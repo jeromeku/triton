@@ -174,17 +174,32 @@ def generate_signature(
     return signature
 
 
-@pytest.mark.parametrize(
-    "dtypes, hints, constants",
-    [(DEFAULT_MATMUL_DTYPES, DEFAULT_MATMUL_HINTS, DEFAULT_MATMUL_CONSTANTS)],
+NO_HINTS = {k: None for k in MATMUL_ARGS}
+DEFAULT_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
+NO_HINT_SIGNATURE = (
+    "*fp32, *fp16, *fp16, i32, i32, i32, i32, i32, i32, i32, i32, i32, 16, 16, 16"
 )
-def test_default_signature(dtypes, hints, constants):
+
+
+@pytest.mark.parametrize(
+    "dtypes, hints, constants, expected_signature",
+    [
+        (
+            DEFAULT_MATMUL_DTYPES,
+            DEFAULT_MATMUL_HINTS,
+            DEFAULT_MATMUL_CONSTANTS,
+            DEFAULT_SIGNATURE,
+        ),
+        (DEFAULT_MATMUL_DTYPES, NO_HINTS, DEFAULT_MATMUL_CONSTANTS, NO_HINT_SIGNATURE),
+    ],
+    ids=["default", "no_hints"],
+)
+def test_default_signature(dtypes, hints, constants, expected_signature):
     signature = generate_signature(
         dtypes=dtypes,
         hints=hints,
         constant_vals=constants,
     )
-    expected_signature = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
 
     assert (
         signature == expected_signature
