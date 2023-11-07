@@ -5,7 +5,7 @@ import triton.language as tl
 
 
 @triton.jit
-def kernel(
+def matmul(
     C,
     A,
     B,

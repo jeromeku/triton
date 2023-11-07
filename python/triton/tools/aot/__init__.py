@@ -8,3 +8,4 @@ from .linker import (
     SourceGenerator,
 )
 from .parsers import HeaderParser, KernelLinkerMeta
+from .tracing import KernelTracer, TraceArtifact, TraceConfig

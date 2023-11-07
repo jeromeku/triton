@@ -639,10 +639,10 @@ class JITFunction(KernelInterface[T]):
             )
 
         if trace:
-            from triton.tools.jitted_aot import (
-                CompiledArtifact,
+            from triton.tools.aot.compiler import JITCompileArgs
+            from triton.tools.aot.tracing import TraceArtifact
+            from triton.tools.jitted_aot import (  # CompiledArtifact,
                 Grid,
-                JITCompileArgs,
                 create_aot_kernel,
             )
 
@@ -661,15 +661,17 @@ class JITFunction(KernelInterface[T]):
                 device_type=device_type,
                 grid=Grid(grid_0, grid_1, grid_2),
             )
-            kernel_path, compiler_spec = create_aot_kernel(
+            kernel_path, compiler_params = create_aot_kernel(
                 bin=bin, jit_args=jit_args, jit_fn=self, trace_dir=trace_dir
             )
 
-            return CompiledArtifact(
-                compiled_binary=bin,
+            return TraceArtifact(
+                kernel_name=self.fn.__name__,
                 kernel_path=kernel_path,
-                compiler_spec=compiler_spec,
+                jit_fn=self,
                 jit_args=jit_args,
+                compiler_params=compiler_params,
+                compiled_binary=bin,
             )
 
         return bin

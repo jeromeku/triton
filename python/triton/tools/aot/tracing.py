@@ -15,7 +15,6 @@ import triton
 import triton.language as tl
 from triton.compiler.compiler import CompiledKernel
 from triton.runtime.jit import JITFunction
-from triton.tools.aot import JITCompileArgs
 
 """
 Utilities for generating reference AOT kernels 
@@ -99,10 +98,17 @@ def generate_matmul_reference(
 # Tracing Tools #
 @dataclass
 class TraceArtifact:
+    kernel_name: str
+    # Path to generated kernel headers / sources
+    kernel_path: str | Path
+    # JITFunction used to compile the kernel
+    jit_fn: JITFunction
+    # Args / Kwargs passed to `triton.compiler.compiler.compile`
+    jit_args: dict
+    # Compiled kernel
     compiled_binary: CompiledKernel
-    kernel_path: str
-    compiler_spec: dict
-    jit_args: JITCompileArgs
+    # Dict of params passed to kernel template
+    compiler_params: dict
 
 
 @dataclass
@@ -359,4 +365,87 @@ def trace_matmul_kernels():
         print(f"Is close {is_close}")
 
 
-trace_matmul_kernels()
+def test_single_trace():
+    from triton.tools.aot.compiler import AOT_C_CUDA_Compiler
+
+    trace_dir = Path("traced_kernels").absolute()
+    if trace_dir.exists():
+        shutil.rmtree(trace_dir)
+    trace_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
+    kernel_dir = (
+        Path(triton.__path__[0]).parent.absolute()
+        / "test"
+        / "unit"
+        / "tools"
+        / "fixtures"
+        / "kernels"
+    )
+    matmul_config = MatMulConfig()
+    matmul_tracer = MatMulKernelTracer(kernel_dir)
+    kernel_configs = [matmul_config]
+    trace_configs = [TraceConfig(trace_dir=trace_dir)]
+    traces, outputs, checks = matmul_tracer.trace(
+        kernel_configs=kernel_configs, trace_configs=trace_configs
+    )
+
+    trace: TraceArtifact = traces[0]
+    for actual, expected in zip(outputs, checks):
+        is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
+        print(f"Is close {is_close}")
+
+    compiler = AOT_C_CUDA_Compiler(
+        kernel_name=trace.kernel_name,
+        compiled_binary=trace.compiled_binary,
+        jit_args=trace.jit_args,
+        jit_fn=trace.jit_fn,
+    )
+
+    with open(trace_dir / f"{trace.kernel_name}-compiled.h", "w") as fp:
+        fp.write(compiler.generate_header())
+
+    with open(trace_dir / f"{trace.kernel_name}-compiled.cu", "w") as fp:
+        fp.write(compiler.generate_source())
+
+    # Check that the generated code is the same as the reference code
+    reference_header = (
+        trace_dir
+        / trace.kernel_name
+        / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.h"
+    ).read_text()
+    reference_source = (
+        trace_dir
+        / trace.kernel_name
+        / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.c"
+    ).read_text()
+    check_codegen(compiler.generate_header(), reference_header)
+    check_codegen(compiler.generate_source(), reference_source)
+
+    from triton.tools.aot.linker import AOT_C_CUDA_Linker
+
+    headers = list(trace.kernel_path.parent.glob("*.h"))
+    linker = AOT_C_CUDA_Linker(headers)
+    result = linker.generate()
+    with open(trace_dir / f"{trace.kernel_name}-linked.h", "w") as fp:
+        fp.write(result.header)
+    with open(trace_dir / f"{trace.kernel_name}-linked.cu", "w") as fp:
+        fp.write(result.source)
+    reference_header = (trace_dir / trace.kernel_name / "matmul.h").read_text()
+    reference_source = (trace_dir / trace.kernel_name / "matmul.c").read_text()
+    check_codegen(result.header, reference_header)
+    check_codegen(result.source, reference_source)
+
+
+def _preprocess_src(src):
+    return list(filter(lambda x: x.strip(), src.split("\n")))
+
+
+def check_codegen(actual: str, expected: str):
+    actual_lines, expected_lines = _preprocess_src(actual), _preprocess_src(expected)
+
+    for actual, expected in zip(actual_lines, expected_lines):
+        assert actual == expected, f"Expected: \n{expected}\nActual: \n{actual}"
+
+
+# test_single_trace()
