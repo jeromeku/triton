@@ -3,8 +3,11 @@ import os
 import shutil
 import subprocess
 import sys
+from collections import OrderedDict
 from pathlib import Path
+from typing import List
 
+import pytest
 import torch
 
 import triton
@@ -81,11 +84,118 @@ class AOTScriptRunner:
         )
 
 
+MATMUL_ARGS = [
+    "C",
+    "A",
+    "B",
+    "M",
+    "N",
+    "K",
+    "stride_cm",
+    "stride_cn",
+    "stride_am",
+    "stride_ak",
+    "stride_bk",
+    "stride_bn",
+]
+
+
+MATMUL_CONSTANTS = ["BLOCK_M", "BLOCK_N", "BLOCK_K"]
+
+
+DEFAULT_MATMUL_DTYPES = OrderedDict(
+    {
+        "C": "*fp32",
+        "A": "*fp16",
+        "B": "*fp16",
+        "M": "i32",
+        "N": "i32",
+        "K": "i32",
+        "stride_cm": "i32",
+        "stride_cn": "i32",
+        "stride_am": "i32",
+        "stride_ak": "i32",
+        "stride_bk": "i32",
+        "stride_bn": "i32",
+    }
+)
+DEFAULT_MATMUL_HINTS = OrderedDict(
+    {
+        "C": 16,
+        "A": 16,
+        "B": 16,
+        "M": None,
+        "N": None,
+        "K": None,
+        "stride_cm": None,
+        "stride_cn": 1,
+        "stride_am": None,
+        "stride_ak": 1,
+        "stride_bk": 16,
+        "stride_bn": 1,
+    }
+)
+
+
+DEFAULT_MATMUL_CONSTANTS = OrderedDict({"BLOCK_M": 16, "BLOCK_N": 16, "BLOCK_K": 16})
+
+
+# Generates AOT reference kernels for matmul
 def generate_matmul_reference(
     kernel_path, out_dir, BM=16, BN=16, BK=16, hints=["", ":16"], dtype="fp16"
 ):
     AOTScriptRunner.compile_aot_kernels(out_dir, kernel_path, dtype, BM, BN, BK, hints)
     AOTScriptRunner.link_aot_kernels(out_dir, "matmul")
+
+
+def generate_signature(
+    dtypes: OrderedDict,
+    hints: OrderedDict,
+    constant_vals: OrderedDict,
+):
+    assert set(dtypes.keys()) == set(MATMUL_ARGS)
+    assert set(hints.keys()) == set(MATMUL_ARGS)
+
+    args = []
+    for arg in MATMUL_ARGS:
+        dtype = dtypes[arg]
+        hint = hints[arg]
+        if hint:
+            args.append(f"{dtype}:{str(hint)}")
+        else:
+            args.append(f"{dtype}")
+
+    args_str = ", ".join(args)
+    consts = []
+    for const in MATMUL_CONSTANTS:
+        consts.append(f"{constant_vals[const]}")
+    consts_str = ", ".join(consts)
+    signature = ", ".join([args_str, consts_str])
+    return signature
+
+
+@pytest.mark.parametrize(
+    "dtypes, hints, constants",
+    [(DEFAULT_MATMUL_DTYPES, DEFAULT_MATMUL_HINTS, DEFAULT_MATMUL_CONSTANTS)],
+)
+def test_default_signature(dtypes, hints, constants):
+    signature = generate_signature(
+        dtypes=dtypes,
+        hints=hints,
+        constant_vals=constants,
+    )
+    expected_signature = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
+
+    assert (
+        signature == expected_signature
+    ), f"Expected signature: {expected_signature}, Actual signature: {signature}"
+
+
+def test_aot_compiled_kernels(matmul_args, matmul_constants):
+    # Generate reference kernel header and source
+    hints = None
+
+    pass
 
 
 """
