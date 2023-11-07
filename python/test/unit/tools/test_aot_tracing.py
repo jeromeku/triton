@@ -9,6 +9,7 @@ from typing import List
 
 import pytest
 import torch
+from dataclasses import dataclass
 
 import triton
 from triton.tools.aot.tracing import MatMulConfig, MatMulKernelTracer, TraceConfig
@@ -238,6 +239,7 @@ def compile_matmul_kernels(
             grid=g,
             kernel_path=kernel_path,
         )
+        AOTScriptRunner.link_aot_kernels(out_dir, kernel_name)
 
 
 @pytest.mark.parametrize(
@@ -387,10 +389,7 @@ def _tt_to_torch(tt):
         raise ValueError(f"Invalid dtype {tt}")
 
 
-@pytest.mark.parametrize(
-    "config_name",
-    [("no_hints",)],
-)
+@pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
 def test_single_trace(
     config_name,
 ):
@@ -429,7 +428,7 @@ def test_single_trace(
     dtype_in = _tt_to_torch(test_config.dtypes["A"])
     dtype_out = _tt_to_torch(test_config.dtypes["C"])
 
-    # Assume that M, N, K are divisible by 16; defaults are 16
+    # Assume that M, N, K are divisible by 16; defaults to 16
     matmul_config = MatMulConfig(
         dtype_in=dtype_in,
         dtype_out=dtype_out,
@@ -454,6 +453,10 @@ def test_single_trace(
         kernel_configs=[matmul_config], trace_configs=[trace_config]
     )
     trace = traces[0]
+    import json
+
+    with open(trace_dir / f"{trace.kernel_name}-jit_args.json", "w") as fp:
+        json.dump({k: str(v) for k, v in trace.jit_args.items()}, fp, indent=2)
     # trace: TraceArtifact = traces[0]
     # for actual, expected in zip(outputs, checks):
     #     is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
@@ -468,7 +471,6 @@ def test_single_trace(
 
     with open(trace_dir / f"{trace.kernel_name}-compiled.h", "w") as fp:
         fp.write(compiler.generate_header())
-
     with open(trace_dir / f"{trace.kernel_name}-compiled.c", "w") as fp:
         fp.write(compiler.generate_source())
 

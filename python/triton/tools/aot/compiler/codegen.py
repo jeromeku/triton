@@ -41,18 +41,18 @@ class Grid:
 @dataclass
 class JITCompileArgs(dict):
     signature: Dict[int, str]
-    device: int
     constants: Dict[int, int]
-    num_warps: int
-    num_ctas: int
-    num_stages: int
-    enable_warp_specialization: bool
-    enable_fp_fusion: bool
-    extern_libs: Dict[str, str]
     configs: tuple[InstanceDescriptor]
-    debug: bool
-    device_type: str
+    num_warps: int
+    num_stages: int
     grid: Grid
+    num_ctas: int = 1
+    enable_warp_specialization: bool = False
+    enable_fp_fusion: bool = True
+    extern_libs: Dict[str, str] = None
+    debug: bool = False
+    device: int = None
+    device_type: str = None
 
     def __post_init__(self):
         self.update(self.__dict__)
