@@ -190,8 +190,17 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
     def _generate_signatures(self):
         meta_sig = f"warps{self.jit_args.num_warps}xstages{self.jit_args.num_stages}"
         signature_str = [str(s) for s in self.jit_args.signature.values()]
-        sig_hash = self._hash_signature(signature_str + [meta_sig])
-        const_sig = "x".join([str(v) for v in self.jit_args.constants.values()])
+
+        # Add constants to signature to match original AOT compile.py where constants are included in the signature
+        # since signature is passed as a user-provided string with all args and constants
+        # This doesn't affect actual kernel implementation but is needed to match the original AOT kernel name.
+        const_str = [str(v) for v in self.jit_args.constants.values()]
+        full_signature_str = signature_str + const_str
+
+        sig_hash = self._hash_signature(full_signature_str + [meta_sig])
+        const_sig = "x".join(
+            const_str
+        )  # "x".join([str(v) for v in self.jit_args.constants.values()])
         return AOTSignatureArgs(meta_sig, signature_str, sig_hash, const_sig)
 
     def _generate_docstring(self):
