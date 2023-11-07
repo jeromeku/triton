@@ -175,7 +175,21 @@ def generate_signature(
 
 
 NO_HINTS = {k: None for k in MATMUL_ARGS}
+STRIDE_CM_HINTS = {
+    k: (v if k != "stride_cm" else 16) for k, v in DEFAULT_MATMUL_HINTS.items()
+}
+STRIDE_AM_HINTS = {
+    k: (v if k != "stride_am" else 16) for k, v in DEFAULT_MATMUL_HINTS.items()
+}
+STRIDE_CM_AM_HINTS = {
+    k: (v if k != "stride_cm" and k != "stride_am" else 16)
+    for k, v in DEFAULT_MATMUL_HINTS.items()
+}
+
 DEFAULT_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
+STRIDE_CM_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32:16, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
+STRIDE_AM_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32:16, i32:1, i32:16, i32:1, 16, 16, 16"
+STRIDE_CM_AM_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32:16, i32:1, i32:16, i32:1, i32:16, i32:1, 16, 16, 16"
 NO_HINT_SIGNATURE = (
     "*fp32, *fp16, *fp16, i32, i32, i32, i32, i32, i32, i32, i32, i32, 16, 16, 16"
 )
@@ -191,8 +205,26 @@ NO_HINT_SIGNATURE = (
             DEFAULT_SIGNATURE,
         ),
         (DEFAULT_MATMUL_DTYPES, NO_HINTS, DEFAULT_MATMUL_CONSTANTS, NO_HINT_SIGNATURE),
+        (
+            DEFAULT_MATMUL_DTYPES,
+            STRIDE_CM_HINTS,
+            DEFAULT_MATMUL_CONSTANTS,
+            STRIDE_CM_SIGNATURE,
+        ),
+        (
+            DEFAULT_MATMUL_DTYPES,
+            STRIDE_AM_HINTS,
+            DEFAULT_MATMUL_CONSTANTS,
+            STRIDE_AM_SIGNATURE,
+        ),
+        (
+            DEFAULT_MATMUL_DTYPES,
+            STRIDE_CM_AM_HINTS,
+            DEFAULT_MATMUL_CONSTANTS,
+            STRIDE_CM_AM_SIGNATURE,
+        ),
     ],
-    ids=["default", "no_hints"],
+    ids=["default", "no_hints", "stride_cm", "stride_am", "stride_cm_am"],
 )
 def test_default_signature(dtypes, hints, constants, expected_signature):
     signature = generate_signature(
