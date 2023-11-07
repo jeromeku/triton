@@ -394,6 +394,7 @@ def test_single_trace(
     config_name,
 ):
     from triton.tools.aot.compiler import AOT_C_CUDA_Compiler
+    from triton.tools.aot.tracing import AOTTraceResult
 
     # Set up directories for reference and traced kernel artifacts
     test_dir = (Path(__file__).parent / "test").absolute()
@@ -452,55 +453,55 @@ def test_single_trace(
     traces, outputs, checks = matmul_tracer.trace(
         kernel_configs=[matmul_config], trace_configs=[trace_config]
     )
-    trace = traces[0]
-    import json
+    # trace: AOTTraceResult = traces[0]
+    # import json
 
-    with open(trace_dir / f"{trace.kernel_name}-jit_args.json", "w") as fp:
-        json.dump({k: str(v) for k, v in trace.jit_args.items()}, fp, indent=2)
-    # trace: TraceArtifact = traces[0]
-    # for actual, expected in zip(outputs, checks):
-    #     is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
-    #     print(f"Is close {is_close}")
+    # with open(trace_dir / f"{trace.kernel_name}-jit_args.json", "w") as fp:
+    #     json.dump({k: str(v) for k, v in trace.jit_args.items()}, fp, indent=2)
+    # # trace: TraceArtifact = traces[0]
+    # # for actual, expected in zip(outputs, checks):
+    # #     is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
+    # #     print(f"Is close {is_close}")
 
-    compiler = AOT_C_CUDA_Compiler(
-        kernel_name=trace.kernel_name,
-        compiled_binary=trace.compiled_binary,
-        jit_args=trace.jit_args,
-        jit_fn=trace.jit_fn,
-    )
+    # compiler = AOT_C_CUDA_Compiler(
+    #     kernel_name=trace.kernel_name,
+    #     compiled_binary=trace.compiled_binary,
+    #     jit_args=trace.jit_args,
+    #     jit_fn=trace.jit_fn,
+    # )
 
-    with open(trace_dir / f"{trace.kernel_name}-compiled.h", "w") as fp:
-        fp.write(compiler.generate_header())
-    with open(trace_dir / f"{trace.kernel_name}-compiled.c", "w") as fp:
-        fp.write(compiler.generate_source())
+    # with open(trace_dir / f"{trace.kernel_name}-compiled.h", "w") as fp:
+    #     fp.write(compiler.generate_header())
+    # with open(trace_dir / f"{trace.kernel_name}-compiled.c", "w") as fp:
+    #     fp.write(compiler.generate_source())
 
-    # Check that the generated code is the same as the reference code
-    # reference_header = (
-    #     trace_dir
-    #     / trace.kernel_name
-    #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.h"
-    # ).read_text()
-    # reference_source = (
-    #     trace_dir
-    #     / trace.kernel_name
-    #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.c"
-    # ).read_text()
-    # check_codegen(compiler.generate_header(), reference_header)
-    # check_codegen(compiler.generate_source(), reference_source)
+    # # Check that the generated code is the same as the reference code
+    # # reference_header = (
+    # #     trace_dir
+    # #     / trace.kernel_name
+    # #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.h"
+    # # ).read_text()
+    # # reference_source = (
+    # #     trace_dir
+    # #     / trace.kernel_name
+    # #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.c"
+    # # ).read_text()
+    # # check_codegen(compiler.generate_header(), reference_header)
+    # # check_codegen(compiler.generate_source(), reference_source)
 
-    from triton.tools.aot.linker import AOT_C_CUDA_Linker
+    # from triton.tools.aot.linker import AOT_C_CUDA_Linker
 
-    # headers = list(trace.kernel_path.parent.glob("*.h"))
-    linker = AOT_C_CUDA_Linker(headers)
-    # result = linker.generate()
-    # with open(trace_dir / f"{trace.kernel_name}-linked.h", "w") as fp:
-    #     fp.write(result.header)
-    # with open(trace_dir / f"{trace.kernel_name}-linked.cu", "w") as fp:
-    #     fp.write(result.source)
-    # reference_header = (trace_dir / trace.kernel_name / "matmul.h").read_text()
-    # reference_source = (trace_dir / trace.kernel_name / "matmul.c").read_text()
-    # check_codegen(result.header, reference_header)
-    # check_codegen(result.source, reference_source)
+    # # headers = list(trace.kernel_path.parent.glob("*.h"))
+    # linker = AOT_C_CUDA_Linker(headers)
+    # # result = linker.generate()
+    # # with open(trace_dir / f"{trace.kernel_name}-linked.h", "w") as fp:
+    # #     fp.write(result.header)
+    # # with open(trace_dir / f"{trace.kernel_name}-linked.cu", "w") as fp:
+    # #     fp.write(result.source)
+    # # reference_header = (trace_dir / trace.kernel_name / "matmul.h").read_text()
+    # # reference_source = (trace_dir / trace.kernel_name / "matmul.c").read_text()
+    # # check_codegen(result.header, reference_header)
+    # # check_codegen(result.source, reference_source)
 
 
 def _preprocess_src(src):

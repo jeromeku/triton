@@ -56,8 +56,9 @@ class AOTCompilationResult:
     header: str
     source: str
     params: dict
-    header_path: str
-    source_path: str
+    header_path: str | Path
+    source_path: str | Path
+    compiled_binary: CompiledKernel
 
 
 class AOT_C_CUDA_Compiler(AOT_Compiler):
@@ -106,8 +107,9 @@ class AOT_C_CUDA_Compiler(AOT_Compiler):
             header=header,
             source=source,
             params=self.params,
-            header_path=str(self.trace_dir / header_name),
-            source_path=str(self.trace_dir / source_name),
+            header_path=self.trace_dir / header_name,
+            source_path=self.trace_dir / source_name,
+            compiled_binary=self.compiled_binary,
         )
 
 

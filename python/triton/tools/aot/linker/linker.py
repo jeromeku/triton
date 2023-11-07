@@ -18,8 +18,8 @@ from .codegen import (
 class AOTLinkerResult:
     header: str
     source: str
-    header_path: str
-    source_path: str
+    header_path: str | Path
+    source_path: str | Path
 
 
 class AOTLinker(ABC):
