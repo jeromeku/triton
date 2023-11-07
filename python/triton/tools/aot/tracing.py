@@ -8,24 +8,24 @@ from dataclasses import dataclass
 
 import triton
 import triton.language as tl
+from .compiler import AOTCompilationResult
+from .linker import AOTLinkerResult
 from triton.compiler.compiler import CompiledKernel
 from triton.runtime.jit import JITFunction
 
 
 # Tracing Tools #
 @dataclass
-class TraceArtifact:
+class AOTTraceResult:
     kernel_name: str
-    # Path to generated kernel headers / sources
+    # Path to compiled kernels
     kernel_path: str | Path
     # JITFunction used to compile the kernel
     jit_fn: JITFunction
     # Args / Kwargs passed to `triton.compiler.compiler.compile`
     jit_args: dict
-    # Compiled kernel
-    compiled_binary: CompiledKernel
-    # Dict of params passed to kernel template
-    compiler_params: dict
+    compilation_result: AOTCompilationResult
+    linker_result: AOTLinkerResult
 
 
 @dataclass

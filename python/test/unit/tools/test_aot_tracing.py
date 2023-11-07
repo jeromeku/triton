@@ -488,10 +488,10 @@ def test_single_trace(
     # check_codegen(compiler.generate_header(), reference_header)
     # check_codegen(compiler.generate_source(), reference_source)
 
-    # from triton.tools.aot.linker import AOT_C_CUDA_Linker
+    from triton.tools.aot.linker import AOT_C_CUDA_Linker
 
     # headers = list(trace.kernel_path.parent.glob("*.h"))
-    # linker = AOT_C_CUDA_Linker(headers)
+    linker = AOT_C_CUDA_Linker(headers)
     # result = linker.generate()
     # with open(trace_dir / f"{trace.kernel_name}-linked.h", "w") as fp:
     #     fp.write(result.header)

@@ -4,4 +4,4 @@ from .codegen import (
     HeaderGenerator,
     SourceGenerator,
 )
-from .linker import AOT_C_CUDA_Linker, AOTLinker, LinkerCodegenResult
+from .linker import AOT_C_CUDA_Linker, AOTLinker, AOTLinkerResult

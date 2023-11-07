@@ -638,14 +638,21 @@ class JITFunction(KernelInterface[T]):
                 *bin.assemble_tensormap_to_arg(non_constexpr_arg_values),
             )
 
-        if trace:
-            from triton.tools.aot.compiler import JITCompileArgs
-            from triton.tools.aot.tracing import TraceArtifact
-            from triton.tools.jitted_aot import (  # CompiledArtifact,
+        if trace:  # Check device type, only CUDA supported
+            from triton.tools.aot.compiler import AOT_C_CUDA_Compiler as AOTCompiler
+            from triton.tools.aot.compiler import (
+                AOTCompilationResult,
                 Grid,
-                create_aot_kernel,
+                JITCompileArgs,
             )
+            from triton.tools.aot.linker import AOT_C_CUDA_Linker as AOTLinker
+            from triton.tools.aot.linker import AOTLinkerResult
+            from triton.tools.aot.tracing import AOTTraceResult
 
+            if device_type != "cuda":
+                raise ValueError("Trace only supported for CUDA device type")
+
+            kernel_name = self.fn.__name__
             jit_args = JITCompileArgs(
                 signature=signature,
                 device=device,
@@ -661,17 +668,31 @@ class JITFunction(KernelInterface[T]):
                 device_type=device_type,
                 grid=Grid(grid_0, grid_1, grid_2),
             )
-            kernel_path, compiler_params = create_aot_kernel(
-                bin=bin, jit_args=jit_args, jit_fn=self, trace_dir=trace_dir
+            compiler = AOTCompiler(
+                kernel_name=kernel_name,
+                compiled_binary=bin,
+                jit_args=jit_args,
+                jit_fn=self,
+                trace_dir=trace_dir,
             )
-
-            return TraceArtifact(
-                kernel_name=self.fn.__name__,
+            compilation_result: AOTCompilationResult = compiler.generate()
+            # kernel_path, compiler_params = create_aot_kernel(
+            #     bin=bin, jit_args=jit_args, jit_fn=self, trace_dir=trace_dir
+            # )
+            linker = AOTLinker(
+                kernel_name=kernel_name,
+                headers=[compilation_result.header_path],
+                trace_dir=trace_dir,
+            )
+            linker_result: AOTLinkerResult = linker.generate()
+            kernel_path = compilation_result.header_path.parent
+            return AOTTraceResult(
+                kernel_name=kernel_name,
                 kernel_path=kernel_path,
                 jit_fn=self,
                 jit_args=jit_args,
-                compiler_params=compiler_params,
-                compiled_binary=bin,
+                compilation_result=compilation_result,
+                linker_result=linker_result,
             )
 
         return bin

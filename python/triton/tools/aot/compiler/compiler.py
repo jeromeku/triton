@@ -1,5 +1,9 @@
 from collections import namedtuple
+from pathlib import Path
 
+from dataclasses import dataclass
+
+from .. import DEFAULT_TRACE_DIR
 from .codegen import AOT_C_CUDA_ParamsBuilder, AOTCompilerParamsBuilder, JITCompileArgs
 from triton.compiler.compiler import CompiledKernel
 from triton.runtime.jit import JITFunction
@@ -21,6 +25,7 @@ class AOT_Compiler(ABC):
         compiled_binary: CompiledKernel,
         jit_args: JITCompileArgs,
         jit_fn: JITFunction,
+        trace_dir: Path = None,
     ):
         self.kernel_name = kernel_name
         self.compiled_binary = compiled_binary
@@ -31,6 +36,7 @@ class AOT_Compiler(ABC):
             jit_args=jit_args,
             jit_fn=jit_fn,
         )
+        self.trace_dir = trace_dir or DEFAULT_TRACE_DIR
         self.params = self.build_params()
 
     def build_params(self):
@@ -43,6 +49,15 @@ class AOT_Compiler(ABC):
     @abstractmethod
     def generate_source(self):
         ...
+
+
+@dataclass
+class AOTCompilationResult:
+    header: str
+    source: str
+    params: dict
+    header_path: str
+    source_path: str
 
 
 class AOT_C_CUDA_Compiler(AOT_Compiler):
@@ -71,6 +86,29 @@ class AOT_C_CUDA_Compiler(AOT_Compiler):
         # Generate source
         source = self.params_builder.SOURCE_TEMPLATE.TEMPLATE.format(**source_params)
         return source
+
+    def generate(self):
+        header = self.generate_header()
+        source = self.generate_source()
+        file_name = f'{self.params["kernel_name"]}'
+        header_name = f"{file_name}.h"
+        source_name = f"{file_name}.c"
+
+        header_path = self.trace_dir / header_name
+        source_path = self.trace_dir / source_name
+
+        with open(header_path, "w") as fp:
+            fp.write(header)
+        with open(source_path, "w") as fp:
+            fp.write(source)
+
+        return AOTCompilationResult(
+            header=header,
+            source=source,
+            params=self.params,
+            header_path=str(self.trace_dir / header_name),
+            source_path=str(self.trace_dir / source_name),
+        )
 
 
 # def create_aot_kernel(
