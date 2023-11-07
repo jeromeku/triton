@@ -91,7 +91,8 @@ class AOT_C_CUDA_Compiler(AOT_Compiler):
     def generate(self):
         header = self.generate_header()
         source = self.generate_source()
-        file_name = f'{self.params["kernel_name"]}'
+        suffix = "_".join(f'{self.params["kernel_name"]}'.split("_")[1:])
+        file_name = f"{self.kernel_name}.{suffix}"
         header_name = f"{file_name}.h"
         source_name = f"{file_name}.c"
 

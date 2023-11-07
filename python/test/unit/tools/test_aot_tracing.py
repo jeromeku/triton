@@ -450,9 +450,36 @@ def test_single_trace(
 
     # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
     matmul_tracer = MatMulKernelTracer(kernel_path.parent)
-    traces, outputs, checks = matmul_tracer.trace(
+    traces, *_ = matmul_tracer.trace(
         kernel_configs=[matmul_config], trace_configs=[trace_config]
     )
+    trace: AOTTraceResult = traces[0]
+
+    compiled_header = trace.compilation_result.header_path
+    compiled_source = trace.compilation_result.source_path
+    linked_header = trace.linker_result.header_path
+    linked_source = trace.linker_result.source_path
+
+    assert all(
+        p.exists()
+        for p in [compiled_header, compiled_source, linked_header, linked_source]
+    )
+
+    reference_header_files = [p.name for p in reference_headers]
+    reference_source_files = [p.name for p in reference_sources]
+
+    actual_headers = [compiled_header.name, linked_header.name]
+    actual_sources = [compiled_source.name, linked_source.name]
+
+    assert set(reference_header_files) == set(
+        actual_headers
+    ), f"Expected: {reference_header_files}, Actual: {actual_headers}"
+    assert set(reference_source_files) == set(
+        actual_sources
+    ), f"Expected: {reference_source_files}, Actual: {actual_sources}"
+
+    # Check matching filenames
+
     # trace: AOTTraceResult = traces[0]
     # import json
 
