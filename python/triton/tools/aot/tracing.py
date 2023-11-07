@@ -13,14 +13,13 @@ from dataclasses import dataclass
 
 import triton
 import triton.language as tl
+from triton.compiler.compiler import CompiledKernel
 from triton.runtime.jit import JITFunction
-from triton.tools.aot import CompiledArtifact, JITCompileArgs
+from triton.tools.aot import JITCompileArgs
 
 """
 Utilities for generating reference AOT kernels 
 """
-
-KERNELS_DIR = Path(__file__).parent / "fixtures" / "kernels"
 
 
 # Copied from test/unittest/tools/test_aot.py
@@ -98,6 +97,12 @@ def generate_matmul_reference(
 
 
 # Tracing Tools #
+@dataclass
+class TraceArtifact:
+    compiled_binary: CompiledKernel
+    kernel_path: str
+    compiler_spec: dict
+    jit_args: JITCompileArgs
 
 
 @dataclass
@@ -200,7 +205,7 @@ class KernelTracer(ABC):
         noinline = trace_config.pop("noinline")
 
         jitted_fn = JITFunction(
-            self.KERNEL,
+            self.kernel,
             do_not_specialize=do_not_specialize,
             debug=debug,
             noinline=noinline,
@@ -220,16 +225,20 @@ class KernelTracer(ABC):
 
         grid = self.build_grid(kernel_config)
 
-        compilation_artifact: CompiledArtifact = jitted_fn[grid](
+        trace_artifact: TraceArtifact = jitted_fn[grid](
             *args.values(),
             **constants,
             **trace_config,
         )
-        return compilation_artifact
+        return trace_artifact
 
 
 class MatMulKernelTracer(KernelTracer):
-    KERNEL = KERNELS_DIR / "matmul_kernel.py"
+    KERNEL = "matmul_kernel.py"
+
+    def __init__(self, kernel_dir):
+        self.kernel_dir = Path(kernel_dir).absolute()
+        self.kernel = (self.kernel_dir / self.KERNEL).absolute()
 
     def trace(
         self, kernel_configs: List[MatMulConfig], trace_configs: List[TraceConfig]
@@ -303,19 +312,23 @@ class MatMulKernelTracer(KernelTracer):
         return grid
 
 
-def trace_matmul_kernels():
-    """Replicate the compiled kernel headers and sources for matmul kernels in `test_aot.py`"""
+"""
+Replicate the compiled kernel headers and sources for matmul kernels in `test_aot.py`
+    
+4 cases
+    - no specialization for stride_cm, stride_am
+    - no specialization for stride_cm only
+    - no specialization for stride_am only
+    - implicit specializations for both by passing appropriately shaped tensors (divisible by 16)
 
+"""
+
+
+def trace_matmul_kernels():
     trace_dir = Path("traced_kernels").absolute()
     if trace_dir.exists():
         shutil.rmtree(trace_dir)
     trace_dir.mkdir(parents=True, exist_ok=True)
-
-    # 4 cases
-    # no specialization for stride_cm, stride_am
-    # no specialization for stride_cm only
-    # no specialization for stride_am only
-    # implicit specializations for both by passing appropriately shaped tensors (divisible by 16)
 
     specializations = [("stride_cm", "stride_am"), ("stride_cm",), ("stride_am",)]
     trace_configs = []
@@ -325,9 +338,16 @@ def trace_matmul_kernels():
     trace_configs.append(TraceConfig())
 
     # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
+    kernel_dir = (
+        Path(triton.__path__[0]).parent.absolute()
+        / "test"
+        / "unit"
+        / "tools"
+        / "fixtures"
+        / "kernels"
+    )
     matmul_config = MatMulConfig()
-    matmul_tracer = MatMulKernelTracer()
-
+    matmul_tracer = MatMulKernelTracer(kernel_dir)
     kernel_configs = [matmul_config] * len(trace_configs)
 
     traces, outputs, checks = matmul_tracer.trace(
@@ -337,3 +357,6 @@ def trace_matmul_kernels():
     for actual, expected in zip(outputs, checks):
         is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
         print(f"Is close {is_close}")
+
+
+trace_matmul_kernels()
