@@ -390,6 +390,27 @@ def _tt_to_torch(tt):
 
 
 @pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
+class TestMatmulTrace:
+    @pytest.fixture(autouse=True)
+    def test_dir(self):
+        test_dir = (Path(__file__).parent / "matmul_trace_test").absolute()
+        if test_dir.exists():
+            shutil.rmtree(test_dir)
+        test_dir.mkdir(parents=True, exist_ok=True)
+        return test_dir
+
+    @pytest.fixture(autouse=True)
+    def reference_aot_kernels(self, config_name, test_dir):
+        reference_aot_dir = test_dir / "reference_aot_kernels"
+        reference_aot_dir.mkdir(parents=True, exist_ok=True)
+
+        return config_name
+
+    def test_matmul_class(self, reference_aot_kernels):
+        print(reference_aot_kernels)
+
+
+@pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
 def test_single_trace(
     config_name,
 ):
