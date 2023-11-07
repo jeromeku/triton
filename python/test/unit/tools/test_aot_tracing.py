@@ -11,6 +11,7 @@ import pytest
 import torch
 
 import triton
+from triton.tools.aot.tracing import MatMulConfig, MatMulKernelTracer, TraceConfig
 
 FIXTURES_DIR = Path(__file__).parent.absolute() / "fixtures"
 
@@ -239,20 +240,6 @@ def compile_matmul_kernels(
         )
 
 
-def test_kernel_compilation():
-    out_dir = FIXTURES_DIR / "aot_reference_kernels"
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    compile_matmul_kernels(NO_HINT_SIGNATURE, 1, "M/16, N/16, 1", out_dir=out_dir)
-    kernel_headers = list(out_dir.glob("*.h"))
-    kernel_sources = list(out_dir.glob("*.c"))
-    print(kernel_headers)
-    print(kernel_sources)
-    assert len(kernel_headers) == 1
-    assert len(kernel_sources) == 1
-
-
 @pytest.mark.parametrize(
     "dtypes, hints, constants, expected_signature",
     [
@@ -294,13 +281,6 @@ def test_default_signature(dtypes, hints, constants, expected_signature):
     assert (
         signature == expected_signature
     ), f"Expected signature: {expected_signature}, Actual signature: {signature}"
-
-
-def test_aot_compiled_kernels(matmul_args, matmul_constants):
-    # Generate reference kernel header and source
-    hints = None
-
-    pass
 
 
 """
@@ -350,13 +330,116 @@ def trace_matmul_kernels():
         print(f"Is close {is_close}")
 
 
-def test_single_trace():
+DEFAULT_MATMUL_CONFIG = MatMulConfig(
+    dtype_in=torch.float16,
+    dtype_out=torch.float32,
+    M=16,
+    N=16,
+    K=16,
+    BLOCK_M=16,
+    BLOCK_N=16,
+    BLOCK_K=16,
+    seed=0,
+)
+NO_HINT_TRACE_CONFIG = TraceConfig(do_not_specialize=None, num_warps=1)
+
+
+def test_kernel_compilation():
+    out_dir = FIXTURES_DIR / "aot_reference_kernels"
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    compile_matmul_kernels(NO_HINT_SIGNATURE, 1, "M/16, N/16, 1", out_dir=out_dir)
+    kernel_headers = list(out_dir.glob("*.h"))
+    kernel_sources = list(out_dir.glob("*.c"))
+    print(kernel_headers)
+    print(kernel_sources)
+    assert len(kernel_headers) == 1
+    assert len(kernel_sources) == 1
+
+
+@dataclass
+class MatmulTestConfig:
+    dtypes: OrderedDict
+    hints: OrderedDict
+    constants: OrderedDict
+    num_warps: int
+    grid: str
+
+
+TEST_CONFIGS = {
+    "no_hints": MatmulTestConfig(
+        dtypes=DEFAULT_MATMUL_DTYPES,
+        hints=NO_HINTS,
+        constants=DEFAULT_MATMUL_CONSTANTS,
+        num_warps=1,
+        grid="M/16, N/16, 1",
+    )
+}
+
+
+def _tt_to_torch(tt):
+    if "16" in tt:
+        return torch.float16
+    elif "32" in tt:
+        return torch.float32
+    else:
+        raise ValueError(f"Invalid dtype {tt}")
+
+
+@pytest.mark.parametrize(
+    "config_name",
+    [("no_hints",)],
+)
+def test_single_trace(
+    config_name,
+):
     from triton.tools.aot.compiler import AOT_C_CUDA_Compiler
 
-    trace_dir = Path("traced_kernels").absolute()
-    if trace_dir.exists():
-        shutil.rmtree(trace_dir)
+    # Set up directories for reference and traced kernel artifacts
+    test_dir = (Path(__file__).parent / "test").absolute()
+    if test_dir.exists():
+        shutil.rmtree(test_dir)
+    test_dir.mkdir(parents=True, exist_ok=True)
+
+    reference_aot_dir = test_dir / "reference_aot_kernels"
+    reference_aot_dir.mkdir(parents=True, exist_ok=True)
+
+    trace_dir = test_dir / "traced_kernels"
     trace_dir.mkdir(parents=True, exist_ok=True)
+
+    test_config = TEST_CONFIGS[config_name]
+    signature = generate_signature(
+        test_config.dtypes, test_config.hints, test_config.constants
+    )
+
+    kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
+
+    compile_matmul_kernels(
+        signature,
+        num_warps=test_config.num_warps,
+        grids=test_config.grid,
+        out_dir=reference_aot_dir,
+        kernel_path=kernel_path,
+    )
+    reference_headers = list(reference_aot_dir.glob("*.h"))
+    reference_sources = list(reference_aot_dir.glob("*.c"))
+
+    # Construct MatMulConfig and TraceConfig
+    dtype_in = _tt_to_torch(test_config.dtypes["A"])
+    dtype_out = _tt_to_torch(test_config.dtypes["C"])
+
+    # Assume that M, N, K are divisible by 16; defaults are 16
+    matmul_config = MatMulConfig(
+        dtype_in=dtype_in,
+        dtype_out=dtype_out,
+        BLOCK_M=test_config.constants["BLOCK_M"],
+        BLOCK_N=test_config.constants["BLOCK_N"],
+        BLOCK_K=test_config.constants["BLOCK_K"],
+    )
+    assert matmul_config.M % matmul_config.BLOCK_M == 0
+    assert matmul_config.N % matmul_config.BLOCK_N == 0
+    assert matmul_config.K % matmul_config.BLOCK_K == 0
 
     # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
     kernel_dir = (
