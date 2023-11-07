@@ -10,7 +10,6 @@ from typing import List
 import triton
 from triton.compiler.code_generator import kernel_suffix
 from triton.compiler.make_launcher import ty_to_cpp
-from triton.tools.aot.compiler import JITCompileArgs
 
 desc = """
 Triton ahead-of-time compiler:
@@ -144,14 +143,6 @@ if __name__ == "__main__":
     for i in equal_to_1:
         constexprs.update({i: 1})
 
-    jit_args = JITCompileArgs(
-        signature=signature,
-        constants=constexprs,
-        configs=[config],
-        grid=grid,
-        num_warps=args.num_warps,
-        num_stages=args.num_stages,
-    )
     ccinfo = triton.compile(
         kernel,
         signature=signature,
@@ -201,8 +192,3 @@ if __name__ == "__main__":
         template_path = Path(__file__).parent / f"compile.{ext}"
         with out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}").open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))
-
-    with out_path.with_suffix(f".jit_args.json").open("w") as fp:
-        json.dump({k: str(v) for k, v in jit_args.items()}, fp, indent=2)
-    with out_path.with_suffix(f".params.json").open("w") as fp:
-        json.dump(params, fp, indent=2)
