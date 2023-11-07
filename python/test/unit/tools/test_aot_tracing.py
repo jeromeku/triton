@@ -478,6 +478,12 @@ def test_single_trace(
         actual_sources
     ), f"Expected: {reference_source_files}, Actual: {actual_sources}"
 
+    kernel_sig = "_".join(trace.compilation_result.params["kernel_name"].split("_")[1:])
+    expected_kernel_header = [f for f in reference_headers if kernel_sig in str(f)][
+        0
+    ].read_text()
+    actual_kernel_header = compiled_header.read_text()
+    check_codegen(actual_kernel_header, expected_kernel_header)
     # Check matching filenames
 
     # trace: AOTTraceResult = traces[0]
