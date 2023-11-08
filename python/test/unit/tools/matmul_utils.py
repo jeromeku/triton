@@ -48,6 +48,10 @@ class AOTScriptRunner:
                 str(num_warps),
                 "-g",
                 grid,
+                # Save args passed to `triton.compiler.compile`
+                "--save_args",
+                # Save params dict used to hydrate kernel template
+                "--save_params",
                 kernel_path,
             ],
             check=True,

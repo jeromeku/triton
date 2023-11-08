@@ -10,7 +10,6 @@ import triton
 import triton.language as tl
 from .compiler import AOTCompilationResult
 from .linker import AOTLinkerResult
-from triton.compiler.compiler import CompiledKernel
 from triton.runtime.jit import JITFunction
 
 

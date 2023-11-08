@@ -659,9 +659,6 @@ class JITFunction(KernelInterface[T]):
                 Grid,
                 JITCompileArgs,
             )
-            from triton.tools.aot.linker import AOT_C_CUDA_Linker as AOTLinker
-            from triton.tools.aot.linker import AOTLinkerResult
-            from triton.tools.aot.tracing import AOTTraceResult
 
             if device_type != "cuda":
                 raise ValueError("Trace only supported for CUDA device type")

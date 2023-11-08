@@ -82,6 +82,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--grid", "-g", type=str, help="Launch grid of the kernel", required=True
     )
+    parser.add_argument(
+        "--save_args",
+        action="store_true",
+        help="Save args passed to `triton.compiler.compile`",
+    )
+    parser.add_argument(
+        "--save_params",
+        action="store_true",
+        help="Save params passed to kernel template",
+    )
     args = parser.parse_args()
 
     out_name = args.out_name if args.out_name else args.kernel_name
@@ -192,3 +202,31 @@ if __name__ == "__main__":
         template_path = Path(__file__).parent / f"compile.{ext}"
         with out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}").open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))
+
+    # Dump compile args
+    if args.save_args:
+        with out_path.with_suffix(f".{sig_hash}_{suffix}.jit_args.json").open(
+            "w"
+        ) as fp:
+            serialized_sig = json.dumps(signature)
+            serialized_const = json.dumps(constexprs)
+
+            # Unpack configs to dicts for serialization
+            unpacked_configs = []
+            for c in [config]:
+                unpacked_configs.append({k: list(v) for k, v in c._asdict().items()})
+
+            cleaned_grid = [g.strip() for g in grid]
+            serialized_args = {
+                "signature": signature,
+                "constants": constexprs,
+                "configs": unpacked_configs,
+                "num_warps": args.num_warps,
+                "num_stages": args.num_stages,
+                "grid": cleaned_grid,
+            }
+            json.dump(serialized_args, fp, indent=2)
+    # Dump params
+    if args.save_params:
+        with out_path.with_suffix(f".{sig_hash}_{suffix}.params.json").open("w") as fp:
+            json.dump({k: str(v) for k, v in params.items()}, fp, indent=2)

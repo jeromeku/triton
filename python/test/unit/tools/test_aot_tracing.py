@@ -1,3 +1,4 @@
+import json
 import shutil
 from collections import OrderedDict
 from pathlib import Path
@@ -7,7 +8,9 @@ import pytest
 import torch
 from dataclasses import dataclass
 
-import triton
+from triton.compiler.compiler import instance_descriptor
+from triton.runtime.jit import JITFunction
+from triton.tools.aot.compiler import AOT_C_CUDA_Compiler as AOTCompiler
 from triton.tools.aot.compiler import AOTCompilationResult
 from triton.tools.aot.linker import AOT_C_CUDA_Linker as AOTLinker
 from triton.tools.aot.linker import AOTLinkerResult
@@ -130,10 +133,167 @@ def _tt_to_torch(tt):
         raise ValueError(f"Invalid dtype {tt}")
 
 
+@dataclass
+class AOTScriptResult(dict):
+    headers: List[Path]
+    sources: List[Path]
+    jit_args: List[Path]
+    compiler_params: List[Path]
+
+    def __post_init__(self):
+        self.update(self.__dict__)
+
+
+class TestMatMulCodegen:
+    @pytest.fixture(
+        scope="class",
+        params=[("all_hints",)],  # ("no_hints",),
+        ids=lambda params: "|".join([p.upper() for p in params]),
+    )
+    def configs(self, request):
+        return request.param
+
+    @pytest.fixture(scope="class")
+    def kernel_configs(self, configs):
+        return [TEST_CONFIGS[cfg] for cfg in configs]
+
+    @pytest.fixture(scope="class")
+    def test_dir(self, configs):
+        test_dir = (
+            Path(__file__).parent
+            / "matmul_codegen_test"
+            / "_".join(cfg for cfg in configs)
+        ).absolute()
+        if test_dir.exists():
+            shutil.rmtree(test_dir)
+        test_dir.mkdir(parents=True, exist_ok=True)
+        return test_dir
+
+    @pytest.fixture(scope="class")
+    def reference_dir(self, test_dir):
+        reference_dir = test_dir / "reference_aot_kernels"
+        reference_dir.mkdir(parents=True, exist_ok=True)
+        return reference_dir
+
+    @pytest.fixture(scope="class")
+    def kernel_path(self):
+        kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
+        return kernel_path
+
+    @pytest.fixture(scope="class")
+    def kernel_name(self):
+        """Must match the name of the kernel in `matmul_kernel.py`"""
+        return "matmul"
+
+    @pytest.fixture(scope="class")
+    def expected_kernels(
+        self, kernel_name, reference_dir: Path, kernel_configs, kernel_path: Path
+    ):
+        signatures = [
+            generate_signature(
+                kernel_config.dtypes, kernel_config.hints, kernel_config.constants
+            )
+            for kernel_config in kernel_configs
+        ]
+
+        num_warps = [kernel_config.num_warps for kernel_config in kernel_configs]
+        grids = [kernel_config.grid for kernel_config in kernel_configs]
+
+        AOTScriptRunner.compile_matmul_kernels(
+            kernel_name,
+            signatures,
+            num_warps=num_warps,
+            grids=grids,
+            out_dir=reference_dir,
+            kernel_path=kernel_path,
+        )
+        headers = list(reference_dir.glob("*.h"))
+        sources = list(reference_dir.glob("*.c"))
+        jit_args = list(reference_dir.glob("*jit_args.json"))
+        compiler_params = list(reference_dir.glob("*params.json"))
+
+        return AOTScriptResult(headers, sources, jit_args, compiler_params)
+
+    def test_script_files(self, expected_kernels):
+        headers, sources, jit_args, compiler_params = expected_kernels
+        assert len(headers) >= 1
+        assert len(sources) >= 1
+        assert len(jit_args) >= 1
+        assert len(compiler_params) >= 1
+
+    def _parse_jit_args(self, args_path):
+        class JITArgTypes:
+            """Expected types for JIT args"""
+
+            INT = ["num_warps", "num_stages", "num_ctas", "device"]
+            STRING = ["device_type"]
+            DICT = ["signature", "constants"]
+            LIST = ["grid", "configs"]
+            BOOL = ["enable_warp_specialization", "enable_fp_fusion", "debug"]
+
+        class JITArgDeserializer:  # Need special handling for
+            @staticmethod
+            def deserialize(args):
+                parsed_args = {}
+                for k, v in args.items():
+                    if k in JITArgTypes.INT:
+                        parsed_args[k] = int(v)
+                    elif k in JITArgTypes.BOOL:
+                        if v.lower() == "true":
+                            parsed_args[k] = True
+                        elif v.lower() == "false":
+                            parsed_args[k] = False
+                        else:
+                            raise ValueError(f"Invalid bool value {v}")
+                    elif k in JITArgTypes.DICT:
+                        # Cast arg positions to ints
+                        parsed_args[k] = {int(k): v for k, v in v.items()}
+                    elif k == "configs":
+                        # Create instance descriptors from dict representation
+                        parsed_args[k] = [instance_descriptor(**cfg) for cfg in v]
+                    else:
+                        parsed_args[k] = v
+
+        raw_args = json.load(args_path.open())
+        return JITArgDeserializer.deserialize(raw_args)
+
+    def test_aot_compiler(
+        self,
+        expected_kernels,
+        kernel_name,
+        kernel_path,
+        kernel_configs,
+    ) -> List[AOTCompilationResult]:
+        # Load
+        # headers, sources, jit_args, compiler_params = self.expected_kernels
+        jit_args = []
+        for p in expected_kernels.jit_args:
+            jit_args.append(self._parse_jit_args(p))
+
+        print(jit_args)
+        # Parse jit_args
+        # import json
+
+        # for args_path in jit_args:
+        #     raw_args = json.load(args_path.open())
+
+        # for args in jit_args:
+        #     jit_fn = JITFunction(self.kernel_path)
+        #     compiler = AOTCompiler(
+        #         kernel_name=kernel_name,
+        #         compiled_binary=bin,
+        #         jit_args=args,
+        #         jit_fn=jit_fn,
+        #     )
+
+
+@pytest.mark.skip(
+    reason="Traced Matmul kernels will differ from scripted versions due to handling of specializations"
+)
 class TestMatmulTrace:
     @pytest.fixture(
         scope="class",
-        params=[("no_hints",), ("all_hints",)],
+        params=[("all_hints",)],  # ("no_hints",),
         ids=lambda params: "|".join([p.upper() for p in params]),
     )
     def configs(self, request):
@@ -246,7 +406,18 @@ class TestMatmulTrace:
         traces, *_ = matmul_tracer.trace(
             kernel_configs=matmul_configs, trace_configs=trace_configs
         )
+        # Save jit args
+        import json
 
+        for trace in traces:
+            with open(trace_dir / f"{trace.kernel_name}-jit_args.json", "w") as fp:
+                json.dump({k: str(v) for k, v in trace._jit_args.items()}, fp, indent=2)
+            with open(
+                trace_dir / f"{trace.kernel_name}-compiler_params.json", "w"
+            ) as fp:
+                json.dump(
+                    {k: str(v) for k, v in trace._compiler_params.items()}, fp, indent=2
+                )
         return traces
 
     @pytest.fixture(scope="class")

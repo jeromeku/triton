@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 from dataclasses import dataclass
 
+import triton
 from .templates import (
     DEFAULT_AOT_C_CUDA_HEADER_TEMPLATE,
     DEFAULT_AOT_C_CUDA_SOURCE_TEMPLATE,
@@ -45,7 +46,7 @@ class JITCompileArgs(dict):
     configs: tuple[InstanceDescriptor]
     num_warps: int
     num_stages: int
-    grid: Grid
+    grid: Grid = None
     num_ctas: int = 1
     enable_warp_specialization: bool = False
     enable_fp_fusion: bool = True
@@ -173,14 +174,17 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
     def __init__(
         self,
         kernel_name,
-        compiled_binary: CompiledKernel,
         jit_args: JITCompileArgs,
         jit_fn: JITFunction,
+        compiled_binary: CompiledKernel = None,
     ):
         self.kernel_name = kernel_name
-        self.compiled_binary = compiled_binary
+
         self.jit_args = jit_args
         self.jit_fn = jit_fn
+
+        if not compiled_binary:
+            self.compiled_binary = triton.compile(**self.jit_args)
 
     def _hash_signature(self, sig: List[str]):
         m = hashlib.sha256()
@@ -195,9 +199,9 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         # since signature is passed as a user-provided string with all args and constants
         # This doesn't affect actual kernel implementation but is needed to match the original AOT kernel name.
         const_str = [str(v) for v in self.jit_args.constants.values()]
-        full_signature_str = signature_str + const_str
+        # full_signature_str = signature_str + const_str
 
-        sig_hash = self._hash_signature(full_signature_str + [meta_sig])
+        sig_hash = self._hash_signature(signature_str + [meta_sig])
         const_sig = "x".join(
             const_str
         )  # "x".join([str(v) for v in self.jit_args.constants.values()])
