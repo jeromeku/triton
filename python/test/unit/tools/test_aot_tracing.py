@@ -437,11 +437,8 @@ class TestMatmulTrace:
 
         return headers, sources
 
-    def extract_kernel_sig(trace: AOTTraceResult):
-        return "_".join(trace.compilation_result.params["kernel_name"].split("_")[1:])
-
     @pytest.fixture
-    def traced_kernel(
+    def traced_kernels(
         self,
         test_dir,
         kernel_path,
@@ -483,6 +480,25 @@ class TestMatmulTrace:
         )
 
         return traces
+
+    def extract_kernel_sig(self, trace: AOTTraceResult):
+        return "_".join(trace.compilation_result.params["kernel_name"].split("_")[1:])
+
+    def test_kernel_header_files(self, traced_kernels, expected_kernels):
+        headers, _ = expected_kernels
+        for trace in traced_kernels:
+            kernel_sig = self.extract_kernel_sig(trace)
+            assert any(kernel_sig in str(h) for h in headers)
+
+    def test_kernel_header_match(self, traced_kernels, expected_kernels):
+        headers, _ = expected_kernels
+        for trace in traced_kernels:
+            kernel_sig = self.extract_kernel_sig(trace)
+            expected_header = [h for h in headers if kernel_sig in str(h)][
+                0
+            ].read_text()
+            actual_header = trace.compilation_result.header
+            check_codegen(actual_header, expected_header)
 
     @pytest.fixture(autouse=True)
     def expected_kernel_header(self, expected_kernels):
