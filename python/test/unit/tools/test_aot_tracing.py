@@ -21,6 +21,7 @@ from .matmul_utils import AOTScriptRunner, generate_signature
 # ------------------------------------------------------------------------------------------------------------ #
 
 
+## Test generate_signature given different dtypes, hints, and constants -- see `matmul_configs.py` for details
 @pytest.mark.parametrize(
     "dtypes, hints, constants, expected_signature",
     [
@@ -64,53 +65,7 @@ def test_default_signature(dtypes, hints, constants, expected_signature):
     ), f"Expected signature: {expected_signature}, Actual signature: {signature}"
 
 
-"""
-Replicate the compiled kernel headers and sources for matmul kernels in `test_aot.py`
-    
-4 cases
-    - no specialization for stride_cm, stride_am
-    - no specialization for stride_cm only
-    - no specialization for stride_am only
-    - implicit specializations for both by passing appropriately shaped tensors (divisible by 16)
-
-"""
-
-
-def trace_matmul_kernels():
-    trace_dir = Path("traced_kernels").absolute()
-    if trace_dir.exists():
-        shutil.rmtree(trace_dir)
-    trace_dir.mkdir(parents=True, exist_ok=True)
-
-    specializations = [("stride_cm", "stride_am"), ("stride_cm",), ("stride_am",)]
-    trace_configs = []
-    for spec in specializations:
-        trace_configs.append(TraceConfig(do_not_specialize=spec, trace_dir=trace_dir))
-
-    trace_configs.append(TraceConfig())
-
-    # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
-    kernel_dir = (
-        Path(triton.__path__[0]).parent.absolute()
-        / "test"
-        / "unit"
-        / "tools"
-        / "fixtures"
-        / "kernels"
-    )
-    matmul_config = MatMulConfig()
-    matmul_tracer = MatMulKernelTracer(kernel_dir)
-    kernel_configs = [matmul_config] * len(trace_configs)
-
-    traces, outputs, checks = matmul_tracer.trace(
-        kernel_configs=kernel_configs, trace_configs=trace_configs
-    )
-
-    for actual, expected in zip(outputs, checks):
-        is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
-        print(f"Is close {is_close}")
-
-
+## Test scripted runner for generating reference kernels
 def test_kernel_compilation():
     out_dir = FIXTURES_DIR / "aot_reference_kernels"
     if out_dir.exists():
@@ -125,6 +80,18 @@ def test_kernel_compilation():
     print(kernel_sources)
     assert len(kernel_headers) == 1
     assert len(kernel_sources) == 1
+
+
+"""
+Replicate the compiled kernel headers and sources for matmul kernels in `test_aot.py`
+    
+4 cases
+    - no specialization for stride_cm, stride_am
+    - no specialization for stride_cm only
+    - no specialization for stride_am only
+    - implicit specializations for both by passing appropriately shaped tensors (divisible by 16)
+
+"""
 
 
 @dataclass
@@ -143,7 +110,14 @@ TEST_CONFIGS = {
         constants=DEFAULT_MATMUL_CONSTANTS,
         num_warps=1,
         grid="M/16, N/16, 1",
-    )
+    ),
+    "all_hints": MatmulTestConfig(
+        dtypes=DEFAULT_MATMUL_DTYPES,
+        hints=ALL_HINTS,
+        constants=DEFAULT_MATMUL_CONSTANTS,
+        num_warps=1,
+        grid="M/16, N/16, 1",
+    ),
 }
 
 
@@ -159,11 +133,7 @@ def _tt_to_torch(tt):
 class TestMatmulTrace:
     @pytest.fixture(
         scope="class",
-        params=[
-            [
-                "no_hints",
-            ]
-        ],
+        params=[("no_hints",), ("all_hints",)],
         ids=lambda params: "|".join([p.upper() for p in params]),
     )
     def configs(self, request):
@@ -174,8 +144,12 @@ class TestMatmulTrace:
         return [TEST_CONFIGS[cfg] for cfg in configs]
 
     @pytest.fixture(scope="class")
-    def test_dir(self):
-        test_dir = (Path(__file__).parent / "matmul_trace_test").absolute()
+    def test_dir(self, configs):
+        test_dir = (
+            Path(__file__).parent
+            / "matmul_trace_test"
+            / "_".join(cfg for cfg in configs)
+        ).absolute()
         if test_dir.exists():
             shutil.rmtree(test_dir)
         test_dir.mkdir(parents=True, exist_ok=True)

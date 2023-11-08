@@ -63,7 +63,22 @@ DEFAULT_MATMUL_HINTS = OrderedDict(
 DEFAULT_MATMUL_CONSTANTS = OrderedDict({"BLOCK_M": 16, "BLOCK_N": 16, "BLOCK_K": 16})
 
 # Specialization Configs
-
+ALL_HINTS = OrderedDict(
+    {
+        "C": 16,
+        "A": 16,
+        "B": 16,
+        "M": 16,
+        "N": 16,
+        "K": 16,
+        "stride_cm": 16,
+        "stride_cn": 1,
+        "stride_am": 16,
+        "stride_ak": 1,
+        "stride_bk": 16,
+        "stride_bn": 1,
+    }
+)
 NO_HINTS = {k: None for k in MATMUL_ARGS}
 STRIDE_CM_HINTS = {
     k: (v if k != "stride_cm" else 16) for k, v in DEFAULT_MATMUL_HINTS.items()
