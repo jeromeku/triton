@@ -1,4 +1,4 @@
-from collections import namedtuple
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 from dataclasses import dataclass
@@ -6,15 +6,8 @@ from dataclasses import dataclass
 import triton
 from .. import DEFAULT_TRACE_DIR
 from .codegen import AOT_C_CUDA_ParamsBuilder, AOTCompilerParamsBuilder, JITCompileArgs
-from triton.compiler.compiler import CompiledKernel
+from triton.compiler.compiler import CompiledKernel, instance_descriptor
 from triton.runtime.jit import JITFunction
-
-InstanceDescriptor = namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-)
-
-from abc import ABC, abstractmethod
 
 
 class AOT_Compiler(ABC):
@@ -25,15 +18,15 @@ class AOT_Compiler(ABC):
         kernel_name,
         jit_args: JITCompileArgs,
         jit_fn: JITFunction,
-        trace_dir: Path = None,
+        save_dir: Path = None,
         compiled_binary: CompiledKernel = None,
     ):
         self.kernel_name = kernel_name
         self.jit_args = jit_args
 
-        self.trace_dir = trace_dir or DEFAULT_TRACE_DIR
+        self.save_dir = save_dir or DEFAULT_TRACE_DIR
         if compiled_binary is None:
-            self.compiled_binary = triton.compile(**self.jit_args)
+            self.compiled_binary = triton.compile(jit_fn, **jit_args)
 
         self.params_builder = self.PARAM_BUILDER_CLS(
             kernel_name=kernel_name,
@@ -104,8 +97,8 @@ class AOT_C_CUDA_Compiler(AOT_Compiler):
         header_name = f"{file_name}.h"
         source_name = f"{file_name}.c"
 
-        header_path = self.trace_dir / header_name
-        source_path = self.trace_dir / source_name
+        header_path = self.save_dir / header_name
+        source_path = self.save_dir / source_name
 
         with open(header_path, "w") as fp:
             fp.write(header)
@@ -117,8 +110,8 @@ class AOT_C_CUDA_Compiler(AOT_Compiler):
             header=header,
             source=source,
             params=self.params,
-            header_path=self.trace_dir / header_name,
-            source_path=self.trace_dir / source_name,
+            header_path=self.save_dir / header_name,
+            source_path=self.save_dir / source_name,
             compiled_binary=self.compiled_binary,
             _jit_args=self.jit_args,
             _compiler_params=self.params,

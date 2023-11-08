@@ -176,6 +176,12 @@ class TestMatMulCodegen:
         return reference_dir
 
     @pytest.fixture(scope="class")
+    def codegen_dir(self, test_dir):
+        codegen_dir = test_dir / "codegen_kernels"
+        codegen_dir.mkdir(parents=True, exist_ok=True)
+        return codegen_dir
+
+    @pytest.fixture(scope="class")
     def kernel_path(self):
         kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
         return kernel_path
@@ -263,7 +269,7 @@ class TestMatMulCodegen:
         expected_kernels,
         kernel_name,
         kernel_path,
-        kernel_configs,
+        codegen_dir,
     ) -> List[AOTCompilationResult]:
         # Load
         # headers, sources, jit_args, compiler_params = self.expected_kernels
@@ -271,21 +277,17 @@ class TestMatMulCodegen:
         for p in expected_kernels.jit_args:
             jit_args.append(self._parse_jit_args(p))
 
-        print(jit_args)
-        # Parse jit_args
-        # import json
-
-        # for args_path in jit_args:
-        #     raw_args = json.load(args_path.open())
-
-        # for args in jit_args:
-        #     jit_fn = JITFunction(self.kernel_path)
-        #     compiler = AOTCompiler(
-        #         kernel_name=kernel_name,
-        #         compiled_binary=bin,
-        #         jit_args=args,
-        #         jit_fn=jit_fn,
-        #     )
+        compiled_results = []
+        for args in jit_args:
+            jit_fn = JITFunction(kernel_path)
+            compiler = AOTCompiler(
+                kernel_name=kernel_name,
+                jit_args=args,
+                jit_fn=jit_fn,
+                save_dir=codegen_dir,
+            )
+            compiled_result: AOTCompilationResult = compiler.generate()
+            compiled_results.append(compiled_result)
 
 
 @pytest.mark.skip(

@@ -182,9 +182,7 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
 
         self.jit_args = jit_args
         self.jit_fn = jit_fn
-
-        if not compiled_binary:
-            self.compiled_binary = triton.compile(**self.jit_args)
+        self.compiled_binary = compiled_binary or triton.compile(jit_args)
 
     def _hash_signature(self, sig: List[str]):
         m = hashlib.sha256()
@@ -192,29 +190,29 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         return m.hexdigest()[:8]
 
     def _generate_signatures(self):
-        meta_sig = f"warps{self.jit_args.num_warps}xstages{self.jit_args.num_stages}"
-        signature_str = [str(s) for s in self.jit_args.signature.values()]
+        meta_sig = (
+            f'warps{self.jit_args["num_warps"]}xstages{self.jit_args["num_stages"]}'
+        )
+        signature_str = [str(s) for s in self.jit_args["signature"].values()]
 
         # Add constants to signature to match original AOT compile.py where constants are included in the signature
         # since signature is passed as a user-provided string with all args and constants
         # This doesn't affect actual kernel implementation but is needed to match the original AOT kernel name.
-        const_str = [str(v) for v in self.jit_args.constants.values()]
+        const_str = [str(v) for v in self.jit_args["constants"].values()]
         # full_signature_str = signature_str + const_str
 
         sig_hash = self._hash_signature(signature_str + [meta_sig])
-        const_sig = "x".join(
-            const_str
-        )  # "x".join([str(v) for v in self.jit_args.constants.values()])
+        const_sig = "x".join(const_str)
         return AOTSignatureArgs(meta_sig, signature_str, sig_hash, const_sig)
 
     def _generate_docstring(self):
         doc_string = [
-            f"{self.jit_fn.arg_names[i]}={self.jit_args.constants[i]}"
-            for i in self.jit_args.constants.keys()
+            f'{self.jit_fn.arg_names[i]}={self.jit_args["constants"][i]}'
+            for i in self.jit_args["constants"].keys()
         ]
         doc_string += [
-            f"num_warps={self.jit_args.num_warps}",
-            f"num_stages={self.jit_args.num_stages}",
+            f'num_warps={self.jit_args["num_warps"]}',
+            f'num_stages={self.jit_args["num_stages"]}',
         ]
         return doc_string
 
@@ -222,11 +220,11 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         arg_names = []
         arg_types = []
 
-        config = self.jit_args.configs[0]
-        for i in self.jit_args.signature.keys():
+        config = self.jit_args["configs"][0]
+        for i in self.jit_args["signature"].keys():
             if i not in config.equal_to_1:
                 arg_names += [self.jit_fn.arg_names[i]]
-                arg_types += [self.jit_args.signature[i]]
+                arg_types += [self.jit_args["signature"][i]]
         return AOTArgs(arg_names, arg_types)
 
     def _generate_arg_params(self, args: AOTArgs):
@@ -235,8 +233,8 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         return AOTArgParams(arg_pointers, num_args)
 
     def _generate_function_name_params(self, sig_hash: str) -> AOTFunctionNameParams:
-        config = self.jit_args.configs[0]
-        suffix = kernel_suffix(self.jit_args.signature.values(), config)
+        config = self.jit_args["configs"][0]
+        suffix = kernel_suffix(self.jit_args["signature"].values(), config)
         func_name = "_".join([self.kernel_name, sig_hash, suffix])
         triton_kernel_name = "_".join([self.kernel_name, suffix])
         return AOTFunctionNameParams(
@@ -260,8 +258,8 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
 
         full_signature = ", ".join(
             [
-                f"{ty_to_cpp(self.jit_args.signature[i])} {self.jit_fn.arg_names[i]}"
-                for i in self.jit_args.signature.keys()
+                f'{ty_to_cpp(self.jit_args["signature"][i])} {self.jit_fn.arg_names[i]}'
+                for i in self.jit_args["signature"].keys()
             ]
         )
         algo_info = "_".join([signatures.const_sig, signatures.meta_sig])
@@ -270,7 +268,7 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
 
     def _generate_grid_params(self):
         grid_params = AOTGridParams(
-            self.jit_args.grid.x, self.jit_args.grid.y, self.jit_args.grid.z
+            self.jit_args["grid"][0], self.jit_args["grid"][1], self.jit_args["grid"][2]
         )
         return grid_params
 
@@ -314,7 +312,7 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         # remaining params
         kernel_docstring = self._generate_docstring()
         shared = self.compiled_binary.shared
-        num_warps = self.jit_args.num_warps
+        num_warps = self.jit_args["num_warps"]
         _placeholder = ""
 
         # build full spec
