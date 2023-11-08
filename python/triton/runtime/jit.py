@@ -679,21 +679,23 @@ class JITFunction(KernelInterface[T]):
             # kernel_path, compiler_params = create_aot_kernel(
             #     bin=bin, jit_args=jit_args, jit_fn=self, trace_dir=trace_dir
             # )
-            linker = AOTLinker(
-                kernel_name=kernel_name,
-                headers=[compilation_result.header_path],
-                trace_dir=trace_dir,
-            )
-            linker_result: AOTLinkerResult = linker.generate()
-            kernel_path = compilation_result.header_path.parent
-            return AOTTraceResult(
-                kernel_name=kernel_name,
-                kernel_path=kernel_path,
-                jit_fn=self,
-                jit_args=jit_args,
-                compilation_result=compilation_result,
-                linker_result=linker_result,
-            )
+            return compilation_result
+            # linker = AOTLinker(
+            #     kernel_name=kernel_name,
+            #     headers=[compilation_result.header_path],
+            #     trace_dir=trace_dir,
+            # )
+
+            # linker_result: AOTLinkerResult = linker.generate()
+            # kernel_path = compilation_result.header_path.parent
+            # return AOTTraceResult(
+            #     kernel_name=kernel_name,
+            #     kernel_path=kernel_path,
+            #     jit_fn=self,
+            #     jit_args=jit_args,
+            #     compilation_result=compilation_result,
+            #     linker_result=linker_result,
+            # )
 
         return bin
 

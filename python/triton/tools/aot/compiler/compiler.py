@@ -53,6 +53,7 @@ class AOT_Compiler(ABC):
 
 @dataclass
 class AOTCompilationResult:
+    kernel_name: str
     header: str
     source: str
     params: dict
@@ -105,6 +106,7 @@ class AOT_C_CUDA_Compiler(AOT_Compiler):
             fp.write(source)
 
         return AOTCompilationResult(
+            kernel_name=self.kernel_name,
             header=header,
             source=source,
             params=self.params,

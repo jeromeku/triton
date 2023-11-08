@@ -148,7 +148,7 @@ class KernelTracer(ABC):
 
         grid = self.build_grid(kernel_config)
 
-        trace_artifact: TraceArtifact = jitted_fn[grid](
+        trace_artifact: AOTCompilationResult = jitted_fn[grid](
             *args.values(),
             **constants,
             **trace_config,

@@ -12,7 +12,9 @@ import torch
 from dataclasses import dataclass
 
 import triton
-from triton.tools.aot.compiler import AOT_C_CUDA_Compiler
+from triton.tools.aot.compiler import AOTCompilationResult
+from triton.tools.aot.linker import AOT_C_CUDA_Linker as AOTLinker
+from triton.tools.aot.linker import AOTLinkerResult
 from triton.tools.aot.tracing import (
     AOTTraceResult,
     MatMulConfig,
@@ -395,9 +397,24 @@ def _tt_to_torch(tt):
         raise ValueError(f"Invalid dtype {tt}")
 
 
-@pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
 class TestMatmulTrace:
-    @pytest.fixture(autouse=True)
+    @pytest.fixture(
+        scope="class",
+        params=[
+            [
+                "no_hints",
+            ]
+        ],
+        ids=lambda params: "|".join([p.upper() for p in params]),
+    )
+    def configs(self, request):
+        return request.param
+
+    @pytest.fixture(scope="class")
+    def kernel_configs(self, configs):
+        return [TEST_CONFIGS[cfg] for cfg in configs]
+
+    @pytest.fixture(scope="class")
     def test_dir(self):
         test_dir = (Path(__file__).parent / "matmul_trace_test").absolute()
         if test_dir.exists():
@@ -405,30 +422,41 @@ class TestMatmulTrace:
         test_dir.mkdir(parents=True, exist_ok=True)
         return test_dir
 
-    @pytest.fixture(autouse=True)
+    @pytest.fixture(scope="class")
+    def reference_aot_dir(self, test_dir):
+        reference_aot_dir = test_dir / "reference_aot_kernels"
+        reference_aot_dir.mkdir(parents=True, exist_ok=True)
+        return reference_aot_dir
+
+    @pytest.fixture(scope="class")
+    def trace_dir(self, test_dir):
+        trace_dir = test_dir / "traced_kernels"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        return trace_dir
+
+    @pytest.fixture(scope="class")
     def kernel_path(self):
         kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
         return kernel_path
 
-    @pytest.fixture(autouse=True)
-    def kernel_config(self, config_name):
-        return TEST_CONFIGS[config_name]
+    @pytest.fixture(scope="class")
+    def expected_kernels(
+        self, reference_aot_dir: Path, kernel_configs, kernel_path: Path
+    ):
+        signatures = [
+            generate_signature(
+                kernel_config.dtypes, kernel_config.hints, kernel_config.constants
+            )
+            for kernel_config in kernel_configs
+        ]
 
-    @pytest.fixture(autouse=True)
-    def expected_kernels(self, kernel_config, kernel_path, test_dir):
-        reference_aot_dir = test_dir / "reference_aot_kernels"
-        reference_aot_dir.mkdir(parents=True, exist_ok=True)
-
-        signature = generate_signature(
-            kernel_config.dtypes, kernel_config.hints, kernel_config.constants
-        )
-
-        kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
+        num_warps = [kernel_config.num_warps for kernel_config in kernel_configs]
+        grids = [kernel_config.grid for kernel_config in kernel_configs]
 
         compile_matmul_kernels(
-            signature,
-            num_warps=kernel_config.num_warps,
-            grids=kernel_config.grid,
+            signatures,
+            num_warps=num_warps,
+            grids=grids,
             out_dir=reference_aot_dir,
             kernel_path=kernel_path,
         )
@@ -437,52 +465,65 @@ class TestMatmulTrace:
 
         return headers, sources
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def traced_kernels(
         self,
-        test_dir,
+        trace_dir,
         kernel_path,
-        kernel_config,
-    ):
-        trace_dir = test_dir / "traced_kernels"
-        if trace_dir.exists():
-            shutil.rmtree(trace_dir)
-        trace_dir.mkdir(parents=True, exist_ok=True)
+        kernel_configs,
+    ) -> List[AOTCompilationResult]:
+        trace_configs = []
+        matmul_configs = []
+        for kernel_config in kernel_configs:
+            dtype_in = _tt_to_torch(kernel_config.dtypes["A"])
+            dtype_out = _tt_to_torch(kernel_config.dtypes["C"])
 
-        dtype_in = _tt_to_torch(kernel_config.dtypes["A"])
-        dtype_out = _tt_to_torch(kernel_config.dtypes["C"])
+            # Assume that M, N, K are divisible by 16; defaults to 16
+            matmul_config = MatMulConfig(
+                dtype_in=dtype_in,
+                dtype_out=dtype_out,
+                BLOCK_M=kernel_config.constants["BLOCK_M"],
+                BLOCK_N=kernel_config.constants["BLOCK_N"],
+                BLOCK_K=kernel_config.constants["BLOCK_K"],
+            )
+            assert matmul_config.M % matmul_config.BLOCK_M == 0
+            assert matmul_config.N % matmul_config.BLOCK_N == 0
+            assert matmul_config.K % matmul_config.BLOCK_K == 0
 
-        # Assume that M, N, K are divisible by 16; defaults to 16
-        matmul_config = MatMulConfig(
-            dtype_in=dtype_in,
-            dtype_out=dtype_out,
-            BLOCK_M=kernel_config.constants["BLOCK_M"],
-            BLOCK_N=kernel_config.constants["BLOCK_N"],
-            BLOCK_K=kernel_config.constants["BLOCK_K"],
-        )
-        assert matmul_config.M % matmul_config.BLOCK_M == 0
-        assert matmul_config.N % matmul_config.BLOCK_N == 0
-        assert matmul_config.K % matmul_config.BLOCK_K == 0
-
-        do_not_specialize = [
-            k for k in kernel_config.hints if kernel_config.hints[k] is None
-        ]
-        trace_config = TraceConfig(
-            do_not_specialize=do_not_specialize,
-            num_warps=kernel_config.num_warps,
-            trace_dir=trace_dir,
-        )
+            do_not_specialize = [
+                k for k in kernel_config.hints if kernel_config.hints[k] is None
+            ]
+            trace_config = TraceConfig(
+                do_not_specialize=do_not_specialize,
+                num_warps=kernel_config.num_warps,
+                trace_dir=trace_dir,
+            )
+            trace_configs.append(trace_config)
+            matmul_configs.append(matmul_config)
 
         # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
         matmul_tracer = MatMulKernelTracer(kernel_path.parent)
         traces, *_ = matmul_tracer.trace(
-            kernel_configs=[matmul_config], trace_configs=[trace_config]
+            kernel_configs=matmul_configs, trace_configs=trace_configs
         )
 
         return traces
 
-    def extract_kernel_sig(self, trace: AOTTraceResult):
-        return "_".join(trace.compilation_result.params["kernel_name"].split("_")[1:])
+    @pytest.fixture(scope="class")
+    def linked_traces(self, traced_kernels, trace_dir: Path):
+        kernel_name = traced_kernels[0].kernel_name
+        headers = [t.header_path for t in traced_kernels]
+        linker = AOTLinker(
+            kernel_name=kernel_name,
+            headers=headers,
+            trace_dir=trace_dir,
+        )
+
+        linker_result: AOTLinkerResult = linker.generate()
+        return linker_result
+
+    def extract_kernel_sig(self, trace: AOTCompilationResult):
+        return "_".join(trace.params["kernel_name"].split("_")[1:])
 
     def test_kernel_header_files(self, traced_kernels, expected_kernels):
         headers, _ = expected_kernels
@@ -497,164 +538,156 @@ class TestMatmulTrace:
             expected_header = [h for h in headers if kernel_sig in str(h)][
                 0
             ].read_text()
-            actual_header = trace.compilation_result.header
+            actual_header = trace.header
             check_codegen(actual_header, expected_header)
 
-    @pytest.fixture(autouse=True)
-    def expected_kernel_header(self, expected_kernels):
-        headers, _ = expected_kernels
-        return headers[0].read_text()
 
-    def test_matmul_class(self, expected_kernels):
-        pass
+# @pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
+# def test_single_trace(
+#     config_name,
+# ):
+#     from triton.tools.aot.compiler import AOT_C_CUDA_Compiler
+#     from triton.tools.aot.tracing import AOTTraceResult
 
+#     # Set up directories for reference and traced kernel artifacts
+#     test_dir = (Path(__file__).parent / "test").absolute()
+#     if test_dir.exists():
+#         shutil.rmtree(test_dir)
+#     test_dir.mkdir(parents=True, exist_ok=True)
 
-@pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
-def test_single_trace(
-    config_name,
-):
-    from triton.tools.aot.compiler import AOT_C_CUDA_Compiler
-    from triton.tools.aot.tracing import AOTTraceResult
+#     reference_aot_dir = test_dir / "reference_aot_kernels"
+#     reference_aot_dir.mkdir(parents=True, exist_ok=True)
 
-    # Set up directories for reference and traced kernel artifacts
-    test_dir = (Path(__file__).parent / "test").absolute()
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-    test_dir.mkdir(parents=True, exist_ok=True)
+#     trace_dir = test_dir / "traced_kernels"
+#     trace_dir.mkdir(parents=True, exist_ok=True)
 
-    reference_aot_dir = test_dir / "reference_aot_kernels"
-    reference_aot_dir.mkdir(parents=True, exist_ok=True)
+#     test_config = TEST_CONFIGS[config_name]
+#     signature = generate_signature(
+#         test_config.dtypes, test_config.hints, test_config.constants
+#     )
 
-    trace_dir = test_dir / "traced_kernels"
-    trace_dir.mkdir(parents=True, exist_ok=True)
+#     kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
 
-    test_config = TEST_CONFIGS[config_name]
-    signature = generate_signature(
-        test_config.dtypes, test_config.hints, test_config.constants
-    )
+#     compile_matmul_kernels(
+#         signature,
+#         num_warps=test_config.num_warps,
+#         grids=test_config.grid,
+#         out_dir=reference_aot_dir,
+#         kernel_path=kernel_path,
+#     )
+#     reference_headers = list(reference_aot_dir.glob("*.h"))
+#     reference_sources = list(reference_aot_dir.glob("*.c"))
 
-    kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
+#     # Construct MatMulConfig and TraceConfig
+#     dtype_in = _tt_to_torch(test_config.dtypes["A"])
+#     dtype_out = _tt_to_torch(test_config.dtypes["C"])
 
-    compile_matmul_kernels(
-        signature,
-        num_warps=test_config.num_warps,
-        grids=test_config.grid,
-        out_dir=reference_aot_dir,
-        kernel_path=kernel_path,
-    )
-    reference_headers = list(reference_aot_dir.glob("*.h"))
-    reference_sources = list(reference_aot_dir.glob("*.c"))
+#     # Assume that M, N, K are divisible by 16; defaults to 16
+#     matmul_config = MatMulConfig(
+#         dtype_in=dtype_in,
+#         dtype_out=dtype_out,
+#         BLOCK_M=test_config.constants["BLOCK_M"],
+#         BLOCK_N=test_config.constants["BLOCK_N"],
+#         BLOCK_K=test_config.constants["BLOCK_K"],
+#     )
+#     assert matmul_config.M % matmul_config.BLOCK_M == 0
+#     assert matmul_config.N % matmul_config.BLOCK_N == 0
+#     assert matmul_config.K % matmul_config.BLOCK_K == 0
 
-    # Construct MatMulConfig and TraceConfig
-    dtype_in = _tt_to_torch(test_config.dtypes["A"])
-    dtype_out = _tt_to_torch(test_config.dtypes["C"])
+#     do_not_specialize = [k for k in test_config.hints if test_config.hints[k] is None]
+#     trace_config = TraceConfig(
+#         do_not_specialize=test_config.hints,
+#         num_warps=test_config.num_warps,
+#         trace_dir=trace_dir,
+#     )
 
-    # Assume that M, N, K are divisible by 16; defaults to 16
-    matmul_config = MatMulConfig(
-        dtype_in=dtype_in,
-        dtype_out=dtype_out,
-        BLOCK_M=test_config.constants["BLOCK_M"],
-        BLOCK_N=test_config.constants["BLOCK_N"],
-        BLOCK_K=test_config.constants["BLOCK_K"],
-    )
-    assert matmul_config.M % matmul_config.BLOCK_M == 0
-    assert matmul_config.N % matmul_config.BLOCK_N == 0
-    assert matmul_config.K % matmul_config.BLOCK_K == 0
+#     # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
+#     matmul_tracer = MatMulKernelTracer(kernel_path.parent)
+#     traces, *_ = matmul_tracer.trace(
+#         kernel_configs=[matmul_config], trace_configs=[trace_config]
+#     )
+#     trace: AOTTraceResult = traces[0]
 
-    do_not_specialize = [k for k in test_config.hints if test_config.hints[k] is None]
-    trace_config = TraceConfig(
-        do_not_specialize=test_config.hints,
-        num_warps=test_config.num_warps,
-        trace_dir=trace_dir,
-    )
+#     compiled_header = trace.compilation_result.header_path
+#     compiled_source = trace.compilation_result.source_path
+#     linked_header = trace.linker_result.header_path
+#     linked_source = trace.linker_result.source_path
 
-    # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
-    matmul_tracer = MatMulKernelTracer(kernel_path.parent)
-    traces, *_ = matmul_tracer.trace(
-        kernel_configs=[matmul_config], trace_configs=[trace_config]
-    )
-    trace: AOTTraceResult = traces[0]
+#     assert all(
+#         p.exists()
+#         for p in [compiled_header, compiled_source, linked_header, linked_source]
+#     )
 
-    compiled_header = trace.compilation_result.header_path
-    compiled_source = trace.compilation_result.source_path
-    linked_header = trace.linker_result.header_path
-    linked_source = trace.linker_result.source_path
+#     reference_header_files = [p.name for p in reference_headers]
+#     reference_source_files = [p.name for p in reference_sources]
 
-    assert all(
-        p.exists()
-        for p in [compiled_header, compiled_source, linked_header, linked_source]
-    )
+#     actual_headers = [compiled_header.name, linked_header.name]
+#     actual_sources = [compiled_source.name, linked_source.name]
 
-    reference_header_files = [p.name for p in reference_headers]
-    reference_source_files = [p.name for p in reference_sources]
+#     assert set(reference_header_files) == set(
+#         actual_headers
+#     ), f"Expected: {reference_header_files}, Actual: {actual_headers}"
+#     assert set(reference_source_files) == set(
+#         actual_sources
+#     ), f"Expected: {reference_source_files}, Actual: {actual_sources}"
 
-    actual_headers = [compiled_header.name, linked_header.name]
-    actual_sources = [compiled_source.name, linked_source.name]
+#     kernel_sig = "_".join(trace.compilation_result.params["kernel_name"].split("_")[1:])
+#     expected_kernel_header = [f for f in reference_headers if kernel_sig in str(f)][
+#         0
+#     ].read_text()
+#     actual_kernel_header = compiled_header.read_text()
+#     check_codegen(actual_kernel_header, expected_kernel_header)
+# Check matching filenames
 
-    assert set(reference_header_files) == set(
-        actual_headers
-    ), f"Expected: {reference_header_files}, Actual: {actual_headers}"
-    assert set(reference_source_files) == set(
-        actual_sources
-    ), f"Expected: {reference_source_files}, Actual: {actual_sources}"
+# trace: AOTTraceResult = traces[0]
+# import json
 
-    kernel_sig = "_".join(trace.compilation_result.params["kernel_name"].split("_")[1:])
-    expected_kernel_header = [f for f in reference_headers if kernel_sig in str(f)][
-        0
-    ].read_text()
-    actual_kernel_header = compiled_header.read_text()
-    check_codegen(actual_kernel_header, expected_kernel_header)
-    # Check matching filenames
+# with open(trace_dir / f"{trace.kernel_name}-jit_args.json", "w") as fp:
+#     json.dump({k: str(v) for k, v in trace.jit_args.items()}, fp, indent=2)
+# # trace: TraceArtifact = traces[0]
+# # for actual, expected in zip(outputs, checks):
+# #     is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
+# #     print(f"Is close {is_close}")
 
-    # trace: AOTTraceResult = traces[0]
-    # import json
+# compiler = AOT_C_CUDA_Compiler(
+#     kernel_name=trace.kernel_name,
+#     compiled_binary=trace.compiled_binary,
+#     jit_args=trace.jit_args,
+#     jit_fn=trace.jit_fn,
+# )
 
-    # with open(trace_dir / f"{trace.kernel_name}-jit_args.json", "w") as fp:
-    #     json.dump({k: str(v) for k, v in trace.jit_args.items()}, fp, indent=2)
-    # # trace: TraceArtifact = traces[0]
-    # # for actual, expected in zip(outputs, checks):
-    # #     is_close = torch.allclose(actual, expected, atol=1e-1, rtol=0)
-    # #     print(f"Is close {is_close}")
+# with open(trace_dir / f"{trace.kernel_name}-compiled.h", "w") as fp:
+#     fp.write(compiler.generate_header())
+# with open(trace_dir / f"{trace.kernel_name}-compiled.c", "w") as fp:
+#     fp.write(compiler.generate_source())
 
-    # compiler = AOT_C_CUDA_Compiler(
-    #     kernel_name=trace.kernel_name,
-    #     compiled_binary=trace.compiled_binary,
-    #     jit_args=trace.jit_args,
-    #     jit_fn=trace.jit_fn,
-    # )
+# # Check that the generated code is the same as the reference code
+# # reference_header = (
+# #     trace_dir
+# #     / trace.kernel_name
+# #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.h"
+# # ).read_text()
+# # reference_source = (
+# #     trace_dir
+# #     / trace.kernel_name
+# #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.c"
+# # ).read_text()
+# # check_codegen(compiler.generate_header(), reference_header)
+# # check_codegen(compiler.generate_source(), reference_source)
 
-    # with open(trace_dir / f"{trace.kernel_name}-compiled.h", "w") as fp:
-    #     fp.write(compiler.generate_header())
-    # with open(trace_dir / f"{trace.kernel_name}-compiled.c", "w") as fp:
-    #     fp.write(compiler.generate_source())
+# from triton.tools.aot.linker import AOT_C_CUDA_Linker
 
-    # # Check that the generated code is the same as the reference code
-    # # reference_header = (
-    # #     trace_dir
-    # #     / trace.kernel_name
-    # #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.h"
-    # # ).read_text()
-    # # reference_source = (
-    # #     trace_dir
-    # #     / trace.kernel_name
-    # #     / "matmul.9abb00f7_0d1d2d3de4de5de6de7c8de9c10de11c.c"
-    # # ).read_text()
-    # # check_codegen(compiler.generate_header(), reference_header)
-    # # check_codegen(compiler.generate_source(), reference_source)
-
-    # from triton.tools.aot.linker import AOT_C_CUDA_Linker
-
-    # # headers = list(trace.kernel_path.parent.glob("*.h"))
-    # linker = AOT_C_CUDA_Linker(headers)
-    # # result = linker.generate()
-    # # with open(trace_dir / f"{trace.kernel_name}-linked.h", "w") as fp:
-    # #     fp.write(result.header)
-    # # with open(trace_dir / f"{trace.kernel_name}-linked.cu", "w") as fp:
-    # #     fp.write(result.source)
-    # # reference_header = (trace_dir / trace.kernel_name / "matmul.h").read_text()
-    # # reference_source = (trace_dir / trace.kernel_name / "matmul.c").read_text()
-    # # check_codegen(result.header, reference_header)
-    # # check_codegen(result.source, reference_source)
+# # headers = list(trace.kernel_path.parent.glob("*.h"))
+# linker = AOT_C_CUDA_Linker(headers)
+# # result = linker.generate()
+# # with open(trace_dir / f"{trace.kernel_name}-linked.h", "w") as fp:
+# #     fp.write(result.header)
+# # with open(trace_dir / f"{trace.kernel_name}-linked.cu", "w") as fp:
+# #     fp.write(result.source)
+# # reference_header = (trace_dir / trace.kernel_name / "matmul.h").read_text()
+# # reference_source = (trace_dir / trace.kernel_name / "matmul.c").read_text()
+# # check_codegen(result.header, reference_header)
+# # check_codegen(result.source, reference_source)
 
 
 def _preprocess_src(src):
