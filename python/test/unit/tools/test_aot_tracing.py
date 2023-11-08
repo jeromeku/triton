@@ -215,6 +215,7 @@ def generate_matmul_reference(
 
 
 def compile_matmul_kernels(
+    kernel_name,
     signatures,
     num_warps,
     grids,
@@ -228,8 +229,6 @@ def compile_matmul_kernels(
     if isinstance(grids, str):
         grids = [grids] * len(signatures)
     assert len(signatures) == len(num_warps) == len(grids)
-
-    kernel_name = "matmul"
 
     out_dir = out_dir or FIXTURES_DIR / "aot_reference_kernels"
 
@@ -440,8 +439,13 @@ class TestMatmulTrace:
         return kernel_path
 
     @pytest.fixture(scope="class")
+    def kernel_name(self):
+        """Must match the name of the kernel in `matmul_kernel.py`"""
+        return "matmul"
+
+    @pytest.fixture(scope="class")
     def expected_kernels(
-        self, reference_aot_dir: Path, kernel_configs, kernel_path: Path
+        self, kernel_name, reference_aot_dir: Path, kernel_configs, kernel_path: Path
     ):
         signatures = [
             generate_signature(
@@ -454,6 +458,7 @@ class TestMatmulTrace:
         grids = [kernel_config.grid for kernel_config in kernel_configs]
 
         compile_matmul_kernels(
+            kernel_name,
             signatures,
             num_warps=num_warps,
             grids=grids,
@@ -511,8 +516,7 @@ class TestMatmulTrace:
         return traces
 
     @pytest.fixture(scope="class")
-    def linked_traces(self, traced_kernels, trace_dir: Path):
-        kernel_name = traced_kernels[0].kernel_name
+    def linked_traces(self, kernel_name, traced_kernels, trace_dir: Path):
         headers = [t.header_path for t in traced_kernels]
         linker = AOTLinker(
             kernel_name=kernel_name,
@@ -551,6 +555,16 @@ class TestMatmulTrace:
             ].read_text()
             actual_source = trace.source
             check_codegen(actual_source, expected_source)
+
+    def test_linked_header_match(self, kernel_name, linked_traces, expected_kernels):
+        headers, _ = expected_kernels
+        expected_kernel_file = f"{kernel_name}.h"
+        assert expected_kernel_file in [h.name for h in headers]
+        expected_header = [h for h in headers if expected_kernel_file in str(h)][
+            0
+        ].read_text()
+        actual_header = linked_traces.header
+        check_codegen(actual_header, expected_header)
 
 
 # @pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
