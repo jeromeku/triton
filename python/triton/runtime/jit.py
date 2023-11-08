@@ -480,6 +480,7 @@ class JITFunction(KernelInterface[T]):
         # Additional arguments for tracing
         trace = get_special_arg("trace", False)
         trace_dir = get_special_arg("trace_dir", None)
+        trace_grid = get_special_arg("trace_grid", None)
         # Bind the remaining arguments to `fn`.
         bound_args = self.signature.bind(*args, **kwargs)
         bound_args.apply_defaults()
@@ -504,6 +505,16 @@ class JITFunction(KernelInterface[T]):
 
         assert num_ctas > 0
         assert grid is not None
+
+        # Tracing enables dynamic launch config by providing two grids -- one for JIT launches with bound grid values
+        # and one for the traced launch with unbound grid values
+        if trace:
+            from triton.tools.aot.tracing import TraceGridConfig
+
+            if isinstance(grid, TraceGridConfig) and not trace_grid:
+                grid = grid.pop("jit_grid")
+                trace_grid = grid.trace_grid
+
         if callable(grid):
             # Arguments are passed as a dict to `grid`, by contract.
             # TODO(jlebar): In the new launch API, pass the compiler flags as a
@@ -652,6 +663,14 @@ class JITFunction(KernelInterface[T]):
             if device_type != "cuda":
                 raise ValueError("Trace only supported for CUDA device type")
 
+            # Enable dynamic launch config
+            # trace_grid is a tuple of strings that enables dynamic grid whereas
+            # default jit path is to bind the grid values
+            if trace_grid:
+                g = Grid(trace_grid[0], trace_grid[1], trace_grid[2])
+            else:
+                g = Grid(grid_0, grid_1, grid_2)
+
             kernel_name = self.fn.__name__
             jit_args = JITCompileArgs(
                 signature=signature,
@@ -666,7 +685,7 @@ class JITFunction(KernelInterface[T]):
                 configs=configs,
                 debug=self.debug,
                 device_type=device_type,
-                grid=Grid(grid_0, grid_1, grid_2),
+                grid=g,
             )
             compiler = AOTCompiler(
                 kernel_name=kernel_name,

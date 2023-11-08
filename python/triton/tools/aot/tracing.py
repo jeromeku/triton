@@ -58,6 +58,15 @@ class TraceConfig(dict):
         self.update(self.__dict__)
 
 
+@dataclass
+class TraceGridConfig(dict):
+    jit_grid: callable | tuple[int, int, int]
+    trace_grid: tuple[str, str, str]
+
+    def __post_init__(self):
+        self.update(self.__dict__)
+
+
 # Kernel-specific configs
 
 
@@ -224,12 +233,13 @@ class MatMulKernelTracer(KernelTracer):
             "BLOCK_K": config.BLOCK_K,
         }
 
-    def build_grid(self, config: MatMulConfig):
-        grid = lambda META: (
+    def build_grid(self, config: MatMulConfig) -> callable | TraceGridConfig:
+        jit_grid = lambda META: (
             (
                 triton.cdiv(config.M, META["BLOCK_M"]),
                 triton.cdiv(config.N, META["BLOCK_N"]),
                 1,
             )
         )
-        return grid
+        trace_grid = (f"M / {config.BLOCK_M}", f"N / {config.BLOCK_N}", "1")
+        return TraceGridConfig(jit_grid, trace_grid)

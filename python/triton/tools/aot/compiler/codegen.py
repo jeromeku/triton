@@ -30,9 +30,9 @@ class CompiledArtifact:
 
 @dataclass
 class Grid:
-    x: int
-    y: int
-    z: int
+    x: int | str
+    y: int | str
+    z: int | str
 
     def __str__(self):
         return f"[{self.x}, {self.y}, {self.z}]"

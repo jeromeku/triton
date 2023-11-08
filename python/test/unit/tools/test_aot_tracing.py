@@ -541,6 +541,16 @@ class TestMatmulTrace:
             actual_header = trace.header
             check_codegen(actual_header, expected_header)
 
+    def test_kernel_source_match(self, traced_kernels, expected_kernels):
+        _, sources = expected_kernels
+        for trace in traced_kernels:
+            kernel_sig = self.extract_kernel_sig(trace)
+            expected_source = [s for s in sources if kernel_sig in str(s)][
+                0
+            ].read_text()
+            actual_source = trace.source
+            check_codegen(actual_source, expected_source)
+
 
 # @pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
 # def test_single_trace(
