@@ -1,8 +1,4 @@
-import glob
-import os
 import shutil
-import subprocess
-import sys
 from collections import OrderedDict
 from pathlib import Path
 from typing import List
@@ -15,238 +11,14 @@ import triton
 from triton.tools.aot.compiler import AOTCompilationResult
 from triton.tools.aot.linker import AOT_C_CUDA_Linker as AOTLinker
 from triton.tools.aot.linker import AOTLinkerResult
-from triton.tools.aot.tracing import (
-    AOTTraceResult,
-    MatMulConfig,
-    MatMulKernelTracer,
-    TraceConfig,
-)
+from triton.tools.aot.tracing import MatMulConfig, MatMulKernelTracer, TraceConfig
 
 FIXTURES_DIR = Path(__file__).parent.absolute() / "fixtures"
 
-# ------------------------------------------------------------------------------------------------------------ #
-"""Configs for matmul kernels 
-
-"""
-MATMUL_ARGS = [
-    "C",
-    "A",
-    "B",
-    "M",
-    "N",
-    "K",
-    "stride_cm",
-    "stride_cn",
-    "stride_am",
-    "stride_ak",
-    "stride_bk",
-    "stride_bn",
-]
-
-MATMUL_CONSTANTS = ["BLOCK_M", "BLOCK_N", "BLOCK_K"]
-
-DEFAULT_MATMUL_DTYPES = OrderedDict(
-    {
-        "C": "*fp32",
-        "A": "*fp16",
-        "B": "*fp16",
-        "M": "i32",
-        "N": "i32",
-        "K": "i32",
-        "stride_cm": "i32",
-        "stride_cn": "i32",
-        "stride_am": "i32",
-        "stride_ak": "i32",
-        "stride_bk": "i32",
-        "stride_bn": "i32",
-    }
-)
-DEFAULT_MATMUL_HINTS = OrderedDict(
-    {
-        "C": 16,
-        "A": 16,
-        "B": 16,
-        "M": None,
-        "N": None,
-        "K": None,
-        "stride_cm": None,
-        "stride_cn": 1,
-        "stride_am": None,
-        "stride_ak": 1,
-        "stride_bk": 16,
-        "stride_bn": 1,
-    }
-)
-
-DEFAULT_MATMUL_CONSTANTS = OrderedDict({"BLOCK_M": 16, "BLOCK_N": 16, "BLOCK_K": 16})
-
-# Specialization Configs
-
-NO_HINTS = {k: None for k in MATMUL_ARGS}
-STRIDE_CM_HINTS = {
-    k: (v if k != "stride_cm" else 16) for k, v in DEFAULT_MATMUL_HINTS.items()
-}
-STRIDE_AM_HINTS = {
-    k: (v if k != "stride_am" else 16) for k, v in DEFAULT_MATMUL_HINTS.items()
-}
-STRIDE_CM_AM_HINTS = {
-    k: (v if k != "stride_cm" and k != "stride_am" else 16)
-    for k, v in DEFAULT_MATMUL_HINTS.items()
-}
-
-# Signatures
-DEFAULT_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
-STRIDE_CM_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32:16, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
-STRIDE_AM_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32:16, i32:1, i32:16, i32:1, 16, 16, 16"
-STRIDE_CM_AM_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32:16, i32:1, i32:16, i32:1, i32:16, i32:1, 16, 16, 16"
-NO_HINT_SIGNATURE = (
-    "*fp32, *fp16, *fp16, i32, i32, i32, i32, i32, i32, i32, i32, i32, 16, 16, 16"
-)
+from .matmul_configs import *
+from .matmul_utils import AOTScriptRunner, generate_signature
 
 # ------------------------------------------------------------------------------------------------------------ #
-
-
-"""
-Utilities for generating reference AOT kernels 
-"""
-
-
-# Copied from test/unittest/tools/test_aot.py
-class AOTScriptRunner:
-    """Wrapper around `triton.tools` for AOT compilation
-
-    Runs `triton.tools.compile` and `triton.tools.link` in subprocesses
-    """
-
-    @staticmethod
-    def compile_kernel(
-        *, dir, signature, kernel_name, out_name, out_path, num_warps, grid, kernel_path
-    ):
-        compiler_path = os.path.join(triton.tools.__path__[0], "compile.py")
-
-        subprocess.run(
-            [
-                sys.executable,
-                compiler_path,
-                "-n",
-                kernel_name,
-                "--signature",
-                signature,
-                "--out-name",
-                out_name,
-                "-o",
-                out_path,
-                "-w",
-                str(num_warps),
-                "-g",
-                grid,
-                kernel_path,
-            ],
-            check=True,
-            cwd=dir,
-        )
-
-    # @staticmethod
-    # def compile_aot_kernels(dir, kernel_path, dtype, BM, BN, BK, ha_hb_hints):
-    #     # compile all desired configs
-    #     for ha in ha_hb_hints:
-    #         for hb in ha_hb_hints:
-    #             sig = f"*fp32:16, *{dtype}:16, *{dtype}:16, i32, i32, i32, i32{ha}, i32:1, i32{hb}, i32:1, i32:16, i32:1, {BM}, {BN}, {BK}"
-    #             name = f"matmul_{dtype}"
-    #             grid = f"M/{BM}, N/{BN}, 1"
-    #             AOTScriptRunner._compile_kernel(
-    #                 dir=dir,
-    #                 signature=sig,
-    #                 kernel_name="kernel",
-    #                 out_name=name,
-    #                 out_path=name,
-    #                 num_warps=1,
-    #                 grid=grid,
-    #                 kernel_path=kernel_path,
-    #             )
-
-    @staticmethod
-    def link_aot_kernels(dir, kernel_name):
-        linker_path = os.path.join(triton.tools.__path__[0], "link.py")
-
-        # link all desired configs
-        h_files = glob.glob(os.path.join(dir, "*.h"))
-        subprocess.run(
-            [sys.executable, linker_path] + h_files + ["-o", kernel_name],
-            check=True,
-            cwd=dir,
-        )
-
-
-# Generates AOT reference kernels for matmul
-
-
-def generate_signature(
-    dtypes: OrderedDict,
-    hints: OrderedDict,
-    constant_vals: OrderedDict,
-):
-    assert set(dtypes.keys()) == set(MATMUL_ARGS)
-    assert set(hints.keys()) == set(MATMUL_ARGS)
-
-    args = []
-    for arg in MATMUL_ARGS:
-        dtype = dtypes[arg]
-        hint = hints[arg]
-        if hint:
-            args.append(f"{dtype}:{str(hint)}")
-        else:
-            args.append(f"{dtype}")
-
-    args_str = ", ".join(args)
-    consts = []
-    for const in MATMUL_CONSTANTS:
-        consts.append(f"{constant_vals[const]}")
-    consts_str = ", ".join(consts)
-    signature = ", ".join([args_str, consts_str])
-    return signature
-
-
-def generate_matmul_reference(
-    kernel_path, out_dir, BM=16, BN=16, BK=16, hints=["", ":16"], dtype="fp16"
-):
-    AOTScriptRunner.compile_aot_kernels(out_dir, kernel_path, dtype, BM, BN, BK, hints)
-    AOTScriptRunner.link_aot_kernels(out_dir, "matmul")
-
-
-def compile_matmul_kernels(
-    kernel_name,
-    signatures,
-    num_warps,
-    grids,
-    out_dir=None,
-    kernel_path=FIXTURES_DIR / "kernels" / "matmul_kernel.py",
-):
-    if isinstance(signatures, str):
-        signatures = [signatures]
-    if isinstance(num_warps, int):
-        num_warps = [num_warps] * len(signatures)
-    if isinstance(grids, str):
-        grids = [grids] * len(signatures)
-    assert len(signatures) == len(num_warps) == len(grids)
-
-    out_dir = out_dir or FIXTURES_DIR / "aot_reference_kernels"
-
-    if not out_dir.exists():
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-    for s, w, g in zip(signatures, num_warps, grids):
-        AOTScriptRunner.compile_kernel(
-            dir=out_dir,
-            signature=s,
-            kernel_name=kernel_name,
-            out_name=kernel_name,
-            out_path=kernel_name,
-            num_warps=w,
-            grid=g,
-            kernel_path=kernel_path,
-        )
-        AOTScriptRunner.link_aot_kernels(out_dir, kernel_name)
 
 
 @pytest.mark.parametrize(
@@ -339,26 +111,14 @@ def trace_matmul_kernels():
         print(f"Is close {is_close}")
 
 
-DEFAULT_MATMUL_CONFIG = MatMulConfig(
-    dtype_in=torch.float16,
-    dtype_out=torch.float32,
-    M=16,
-    N=16,
-    K=16,
-    BLOCK_M=16,
-    BLOCK_N=16,
-    BLOCK_K=16,
-    seed=0,
-)
-NO_HINT_TRACE_CONFIG = TraceConfig(do_not_specialize=None, num_warps=1)
-
-
 def test_kernel_compilation():
     out_dir = FIXTURES_DIR / "aot_reference_kernels"
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    compile_matmul_kernels(NO_HINT_SIGNATURE, 1, "M/16, N/16, 1", out_dir=out_dir)
+    AOTScriptRunner.compile_matmul_kernels(
+        NO_HINT_SIGNATURE, 1, "M/16, N/16, 1", out_dir=out_dir
+    )
     kernel_headers = list(out_dir.glob("*.h"))
     kernel_sources = list(out_dir.glob("*.c"))
     print(kernel_headers)
@@ -457,7 +217,7 @@ class TestMatmulTrace:
         num_warps = [kernel_config.num_warps for kernel_config in kernel_configs]
         grids = [kernel_config.grid for kernel_config in kernel_configs]
 
-        compile_matmul_kernels(
+        AOTScriptRunner.compile_matmul_kernels(
             kernel_name,
             signatures,
             num_warps=num_warps,
