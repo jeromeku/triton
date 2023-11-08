@@ -511,9 +511,12 @@ class JITFunction(KernelInterface[T]):
         if trace:
             from triton.tools.aot.tracing import TraceGridConfig
 
-            if isinstance(grid, TraceGridConfig) and not trace_grid:
+            if isinstance(grid, TraceGridConfig):
                 grid = grid.pop("jit_grid")
-                trace_grid = grid.trace_grid
+
+                # If both trace_grid is provided as a kwarg AND a TraceGridConfig is provided,
+                # the former takes precedence
+                trace_grid = grid.trace_grid if not trace_grid else trace_grid
 
         if callable(grid):
             # Arguments are passed as a dict to `grid`, by contract.

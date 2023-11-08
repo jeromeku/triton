@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from dataclasses import dataclass
@@ -29,6 +29,27 @@ class AOTTraceResult:
 
 
 @dataclass
+class TraceGridConfig(dict):
+    """Purpose of this class is to enable dynamic grids during tracing
+
+    In the typical JIT workflow, the grid is set at compile time, and the kernel is specialized for that grid.
+    However, when tracing, we want to be able to trace the kernel for different grids.
+    This class allows us to do that by specifying a grid for the JIT compiler and a grid for the tracer.
+
+    The jit grid is the same as the grid used in the typical JIT workflow.
+    The trace grid is the grid used for tracing and is a 3-tuple of strings that can reference args in the kernel.
+    E.g., for a matrix multiplication kernel with matrix dims `M, N, K`, the trace grid could be `M / 16, N / 16, 1`.
+
+    """
+
+    jit_grid: Union[callable, tuple[int, int, int]]
+    trace_grid: tuple[str, str, str]
+
+    def __post_init__(self):
+        self.update(self.__dict__)
+
+
+@dataclass
 class TraceConfig(dict):
     """Kwargs passed to `JITFunction.run`"""
 
@@ -53,15 +74,7 @@ class TraceConfig(dict):
     # Trace options
     trace: bool = True
     trace_dir: Optional[Path] = None
-
-    def __post_init__(self):
-        self.update(self.__dict__)
-
-
-@dataclass
-class TraceGridConfig(dict):
-    jit_grid: callable | tuple[int, int, int]
-    trace_grid: tuple[str, str, str]
+    trace_grid: TraceGridConfig = None
 
     def __post_init__(self):
         self.update(self.__dict__)
@@ -233,7 +246,7 @@ class MatMulKernelTracer(KernelTracer):
             "BLOCK_K": config.BLOCK_K,
         }
 
-    def build_grid(self, config: MatMulConfig) -> callable | TraceGridConfig:
+    def build_grid(self, config: MatMulConfig) -> TraceGridConfig:
         jit_grid = lambda META: (
             (
                 triton.cdiv(config.M, META["BLOCK_M"]),

@@ -497,6 +497,7 @@ class TestMatmulTrace:
                 do_not_specialize=do_not_specialize,
                 num_warps=kernel_config.num_warps,
                 trace_dir=trace_dir,
+                trace_grid=kernel_config.grid.split(","),
             )
             trace_configs.append(trace_config)
             matmul_configs.append(matmul_config)
