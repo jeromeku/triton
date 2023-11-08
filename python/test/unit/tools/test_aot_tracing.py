@@ -253,6 +253,7 @@ class TestMatMulCodegen:
                         parsed_args[k] = [instance_descriptor(**cfg) for cfg in v]
                     else:
                         parsed_args[k] = v
+                return parsed_args
 
         raw_args = json.load(args_path.open())
         return JITArgDeserializer.deserialize(raw_args)
