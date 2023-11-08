@@ -12,7 +12,13 @@ import torch
 from dataclasses import dataclass
 
 import triton
-from triton.tools.aot.tracing import MatMulConfig, MatMulKernelTracer, TraceConfig
+from triton.tools.aot.compiler import AOT_C_CUDA_Compiler
+from triton.tools.aot.tracing import (
+    AOTTraceResult,
+    MatMulConfig,
+    MatMulKernelTracer,
+    TraceConfig,
+)
 
 FIXTURES_DIR = Path(__file__).parent.absolute() / "fixtures"
 
@@ -400,14 +406,91 @@ class TestMatmulTrace:
         return test_dir
 
     @pytest.fixture(autouse=True)
-    def reference_aot_kernels(self, config_name, test_dir):
+    def kernel_path(self):
+        kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
+        return kernel_path
+
+    @pytest.fixture(autouse=True)
+    def kernel_config(self, config_name):
+        return TEST_CONFIGS[config_name]
+
+    @pytest.fixture(autouse=True)
+    def expected_kernels(self, kernel_config, kernel_path, test_dir):
         reference_aot_dir = test_dir / "reference_aot_kernels"
         reference_aot_dir.mkdir(parents=True, exist_ok=True)
 
-        return config_name
+        signature = generate_signature(
+            kernel_config.dtypes, kernel_config.hints, kernel_config.constants
+        )
 
-    def test_matmul_class(self, reference_aot_kernels):
-        print(reference_aot_kernels)
+        kernel_path = FIXTURES_DIR / "kernels" / "matmul_kernel.py"
+
+        compile_matmul_kernels(
+            signature,
+            num_warps=kernel_config.num_warps,
+            grids=kernel_config.grid,
+            out_dir=reference_aot_dir,
+            kernel_path=kernel_path,
+        )
+        headers = list(reference_aot_dir.glob("*.h"))
+        sources = list(reference_aot_dir.glob("*.c"))
+
+        return headers, sources
+
+    def extract_kernel_sig(trace: AOTTraceResult):
+        return "_".join(trace.compilation_result.params["kernel_name"].split("_")[1:])
+
+    @pytest.fixture
+    def traced_kernel(
+        self,
+        test_dir,
+        kernel_path,
+        kernel_config,
+    ):
+        trace_dir = test_dir / "traced_kernels"
+        if trace_dir.exists():
+            shutil.rmtree(trace_dir)
+        trace_dir.mkdir(parents=True, exist_ok=True)
+
+        dtype_in = _tt_to_torch(kernel_config.dtypes["A"])
+        dtype_out = _tt_to_torch(kernel_config.dtypes["C"])
+
+        # Assume that M, N, K are divisible by 16; defaults to 16
+        matmul_config = MatMulConfig(
+            dtype_in=dtype_in,
+            dtype_out=dtype_out,
+            BLOCK_M=kernel_config.constants["BLOCK_M"],
+            BLOCK_N=kernel_config.constants["BLOCK_N"],
+            BLOCK_K=kernel_config.constants["BLOCK_K"],
+        )
+        assert matmul_config.M % matmul_config.BLOCK_M == 0
+        assert matmul_config.N % matmul_config.BLOCK_N == 0
+        assert matmul_config.K % matmul_config.BLOCK_K == 0
+
+        do_not_specialize = [
+            k for k in kernel_config.hints if kernel_config.hints[k] is None
+        ]
+        trace_config = TraceConfig(
+            do_not_specialize=do_not_specialize,
+            num_warps=kernel_config.num_warps,
+            trace_dir=trace_dir,
+        )
+
+        # Use default MatmulConfig (16 x 16 x 16), dtype_in = fp16, dtype_out = fp32
+        matmul_tracer = MatMulKernelTracer(kernel_path.parent)
+        traces, *_ = matmul_tracer.trace(
+            kernel_configs=[matmul_config], trace_configs=[trace_config]
+        )
+
+        return traces
+
+    @pytest.fixture(autouse=True)
+    def expected_kernel_header(self, expected_kernels):
+        headers, _ = expected_kernels
+        return headers[0].read_text()
+
+    def test_matmul_class(self, expected_kernels):
+        pass
 
 
 @pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
