@@ -275,7 +275,12 @@ class TestMatMulCodegen:
                             parsed_args[k] = False
                         else:
                             raise ValueError(f"Invalid bool value {v}")
-                    elif k in JITArgTypes.DICT:
+                    elif k in [
+                        "constants",
+                        "_original_constants",
+                        "signature",
+                        "_original_signature",
+                    ]:
                         # Cast arg positions to ints
                         parsed_args[k] = {int(k): v for k, v in v.items()}
                     elif k == "configs":
@@ -320,10 +325,9 @@ class TestMatMulCodegen:
             expected = json.load(compiler_params.open())
             actual = res._compiler_params
             for k in actual.keys():
-                if actual[k] != expected[k]:
-                    print(
-                        f"Key {k} not equal\n\tExpected: {expected[k]}, Actual: {actual[k]}"
-                    )
+                assert (
+                    actual[k] == expected[k]
+                ), f"{k.upper()} not equal\n\tExpected: {expected[k]}, Actual: {actual[k]}"
 
 
 @pytest.mark.skip(

@@ -198,26 +198,26 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         )
 
         sig = (
-            self.jit_args.get("_original_signature", None)
-            or self.jit_args["signature"].values()
+            self.jit_args.get("_original_signature", None) or self.jit_args["signature"]
         )
-        signature_str = [str(s).strip() for s in sig]
+        signature_str = [str(s).strip() for s in sig.values()]
 
         constants = (
-            self.jit_args.get("_original_constants", None)
-            or self.jit_args["constants"].values()
+            self.jit_args.get("_original_constants", None) or self.jit_args["constants"]
         )
 
-        const_str = [str(v) for v in constants]
+        const_str = [str(v) for v in constants.values()]
 
         sig_hash = self._hash_signature(signature_str + [meta_sig])
         const_sig = "x".join(const_str)
         return AOTSignatureArgs(meta_sig, signature_str, sig_hash, const_sig)
 
     def _generate_docstring(self):
+        constants = (
+            self.jit_args.get("_original_constants", None) or self.jit_args["constants"]
+        )
         doc_string = [
-            f'{self.jit_fn.arg_names[i]}={self.jit_args["constants"][i]}'
-            for i in self.jit_args["constants"].keys()
+            f"{self.jit_fn.arg_names[i]}={constants[i]}" for i in constants.keys()
         ]
         doc_string += [
             f'num_warps={self.jit_args["num_warps"]}',

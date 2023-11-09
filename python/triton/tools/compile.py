@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
     # Save original signature -- mainly for debugging and testing of AOT Compiler class
     if args.save_args:
-        original_signature = signature
+        original_signature = {i: v for i, v in enumerate(signature)}
 
     def hash_signature(signature: List[str]):
         m = hashlib.sha256()
@@ -142,7 +142,9 @@ if __name__ == "__main__":
 
     # Save original constants -- mainly for debugging and testing of AOT Compiler class
     if args.save_params:
-        original_constants = list(constexprs.values())
+        from copy import deepcopy
+
+        original_constants = deepcopy(constexprs)
 
     signature = {
         i: s.split(":")[0] for i, s in enumerate(signature) if i not in constexprs
