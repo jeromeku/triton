@@ -1,12 +1,9 @@
 import json
 import shutil
-from collections import OrderedDict
 from pathlib import Path
 from typing import List
 
 import pytest
-import torch
-from dataclasses import dataclass
 
 from triton.compiler.compiler import instance_descriptor
 from triton.runtime.jit import JITFunction
@@ -19,7 +16,7 @@ from triton.tools.aot.tracing import MatMulConfig, MatMulKernelTracer, TraceConf
 FIXTURES_DIR = Path(__file__).parent.absolute() / "fixtures"
 
 from .matmul_configs import *
-from .matmul_utils import AOTScriptRunner, generate_signature
+from .matmul_utils import *
 
 # ------------------------------------------------------------------------------------------------------------ #
 
@@ -87,26 +84,50 @@ def test_kernel_compilation():
 
 """
 Replicate the compiled kernel headers and sources for matmul kernels in `test_aot.py`
-    
-4 cases
-    - no specialization for stride_cm, stride_am
-    - no specialization for stride_cm only
-    - no specialization for stride_am only
-    - implicit specializations for both by passing appropriately shaped tensors (divisible by 16)
+    - "default" - no specialization for `stride_cm`, `stride_am`
+    - "stride_cm" - `stride_cm` specialized to 16
+    - "stride_am" - `stride_am` specialized to 16
+    - "stride_cm_am" - `stride_cm` and `stride_am` specialized to 16
 
+Additionally test cases:
+    - "no_hints" - no specialization for any arg
+    - "all_hints" - specialization for all args
+
+See `matmul_configs.py` for config details
 """
 
-
-@dataclass
-class MatmulTestConfig:
-    dtypes: OrderedDict
-    hints: OrderedDict
-    constants: OrderedDict
-    num_warps: int
-    grid: str
-
-
 TEST_CONFIGS = {
+    "default": MatmulTestConfig(
+        dtypes=DEFAULT_MATMUL_DTYPES,
+        hints=DEFAULT_MATMUL_HINTS,
+        constants=DEFAULT_MATMUL_CONSTANTS,
+        num_warps=1,
+        grid="M/16, N/16, 1",
+    ),
+    # Same as default except `stride_cm` also specialized to 16
+    "stride_cm": MatmulTestConfig(
+        dtypes=DEFAULT_MATMUL_DTYPES,
+        hints=STRIDE_CM_HINTS,
+        constants=DEFAULT_MATMUL_CONSTANTS,
+        num_warps=1,
+        grid="M/16, N/16, 1",
+    ),
+    # Same as default except `stride_am` also specialized to 16
+    "stride_am": MatmulTestConfig(
+        dtypes=DEFAULT_MATMUL_DTYPES,
+        hints=STRIDE_AM_HINTS,
+        constants=DEFAULT_MATMUL_CONSTANTS,
+        num_warps=1,
+        grid="M/16, N/16, 1",
+    ),
+    # Same as default except `stride_cm` and `stride_am` both specialized to 16
+    "stride_cm_am": MatmulTestConfig(
+        dtypes=DEFAULT_MATMUL_DTYPES,
+        hints=STRIDE_CM_AM_HINTS,
+        constants=DEFAULT_MATMUL_CONSTANTS,
+        num_warps=1,
+        grid="M/16, N/16, 1",
+    ),
     "no_hints": MatmulTestConfig(
         dtypes=DEFAULT_MATMUL_DTYPES,
         hints=NO_HINTS,
@@ -124,32 +145,15 @@ TEST_CONFIGS = {
 }
 
 
-def _tt_to_torch(tt):
-    if "16" in tt:
-        return torch.float16
-    elif "32" in tt:
-        return torch.float32
-    else:
-        raise ValueError(f"Invalid dtype {tt}")
-
-
-@dataclass
-class AOTScriptResult(dict):
-    kernel_headers: List[Path]
-    kernel_sources: List[Path]
-    linked_header: List[Path]
-    linked_source: List[Path]
-    jit_args: List[Path]
-    compiler_params: List[Path]
-
-    def __post_init__(self):
-        self.update(self.__dict__)
-
-
 class TestMatMulCodegen:
     @pytest.fixture(
         scope="class",
-        params=[("all_hints",)],  # ("no_hints",),
+        params=[
+            # Single config tests
+            ("all_hints",),
+            ("no_hints",),
+            ("default",),
+        ],  # ("no_hints",),
         ids=lambda params: "|".join([p.upper() for p in params]),
     )
     def configs(self, request):
@@ -385,20 +389,6 @@ class TestMatMulCodegen:
             expected_kernels.linked_source[0].read_text(),
         )
 
-    # def test_aot_codegen_kernel_sources(
-    #     self,
-    #     expected_kernels,
-    #     codegen_kernels,
-    # ) -> List[AOTCompilationResult]:
-    #     # Load
-    #     # headers, sources, jit_args, compiler_params = self.expected_kernels
-    #     actual_sources = [k.source for k in codegen_kernels]
-    #     for actual, expected in zip(
-    #         sorted(actual_sources), sorted(expected_kernels.kernel_sources)
-    #     ):
-    #         expected = expected.read_text()
-    #         check_codegen(actual, expected)
-
 
 @pytest.mark.skip(
     reason="Traced Matmul kernels will differ from scripted versions due to handling of specializations"
@@ -487,8 +477,8 @@ class TestMatmulTrace:
         trace_configs = []
         matmul_configs = []
         for kernel_config in kernel_configs:
-            dtype_in = _tt_to_torch(kernel_config.dtypes["A"])
-            dtype_out = _tt_to_torch(kernel_config.dtypes["C"])
+            dtype_in = tt_to_torch(kernel_config.dtypes["A"])
+            dtype_out = tt_to_torch(kernel_config.dtypes["C"])
 
             # Assume that M, N, K are divisible by 16; defaults to 16
             matmul_config = MatMulConfig(

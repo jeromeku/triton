@@ -4,6 +4,9 @@ import subprocess
 import sys
 from collections import OrderedDict
 from pathlib import Path
+from typing import List
+
+from dataclasses import dataclass
 
 import triton
 from .matmul_configs import *
@@ -132,8 +135,32 @@ def generate_signature(
     return signature
 
 
-# def generate_matmul_reference(
-#     kernel_path, out_dir, BM=16, BN=16, BK=16, hints=["", ":16"], dtype="fp16"
-# ):
-#     AOTScriptRunner.compile_aot_kernels(out_dir, kernel_path, dtype, BM, BN, BK, hints)
-#     AOTScriptRunner.link_aot_kernels(out_dir, "matmul")
+@dataclass
+class AOTScriptResult(dict):
+    kernel_headers: List[Path]
+    kernel_sources: List[Path]
+    linked_header: List[Path]
+    linked_source: List[Path]
+    jit_args: List[Path]
+    compiler_params: List[Path]
+
+    def __post_init__(self):
+        self.update(self.__dict__)
+
+
+@dataclass
+class MatmulTestConfig:
+    dtypes: OrderedDict
+    hints: OrderedDict
+    constants: OrderedDict
+    num_warps: int
+    grid: str
+
+
+def tt_to_torch(tt):
+    if "16" in tt:
+        return torch.float16
+    elif "32" in tt:
+        return torch.float32
+    else:
+        raise ValueError(f"Invalid dtype {tt}")

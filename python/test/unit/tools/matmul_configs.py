@@ -43,6 +43,11 @@ DEFAULT_MATMUL_DTYPES = OrderedDict(
         "stride_bn": "i32",
     }
 )
+
+
+DEFAULT_MATMUL_CONSTANTS = OrderedDict({"BLOCK_M": 16, "BLOCK_N": 16, "BLOCK_K": 16})
+
+# Hint Configs
 DEFAULT_MATMUL_HINTS = OrderedDict(
     {
         "C": 16,
@@ -59,9 +64,6 @@ DEFAULT_MATMUL_HINTS = OrderedDict(
         "stride_bn": 1,
     }
 )
-
-DEFAULT_MATMUL_CONSTANTS = OrderedDict({"BLOCK_M": 16, "BLOCK_N": 16, "BLOCK_K": 16})
-
 # Specialization Configs
 ALL_HINTS = OrderedDict(
     {
@@ -79,7 +81,6 @@ ALL_HINTS = OrderedDict(
         "stride_bn": 1,
     }
 )
-NO_HINTS = {k: None for k in MATMUL_ARGS}
 STRIDE_CM_HINTS = {
     k: (v if k != "stride_cm" else 16) for k, v in DEFAULT_MATMUL_HINTS.items()
 }
@@ -90,6 +91,7 @@ STRIDE_CM_AM_HINTS = {
     k: (v if k != "stride_cm" and k != "stride_am" else 16)
     for k, v in DEFAULT_MATMUL_HINTS.items()
 }
+NO_HINTS = {k: None for k in MATMUL_ARGS}
 
 # Signatures
 DEFAULT_SIGNATURE = "*fp32:16, *fp16:16, *fp16:16, i32, i32, i32, i32, i32:1, i32, i32:1, i32:16, i32:1, 16, 16, 16"
