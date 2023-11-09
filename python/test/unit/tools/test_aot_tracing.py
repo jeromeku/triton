@@ -135,8 +135,10 @@ def _tt_to_torch(tt):
 
 @dataclass
 class AOTScriptResult(dict):
-    headers: List[Path]
-    sources: List[Path]
+    kernel_headers: List[Path]
+    kernel_sources: List[Path]
+    linked_header: List[Path]
+    linked_source: List[Path]
     jit_args: List[Path]
     compiler_params: List[Path]
 
@@ -215,34 +217,30 @@ class TestMatMulCodegen:
         )
         headers = list(reference_dir.glob("*.h"))
         sources = list(reference_dir.glob("*.c"))
+
+        linked_header = list(reference_dir.glob(f"{kernel_name}.h"))
+        kernel_headers = list(set(headers) - set(linked_header))
+        linked_source = list(reference_dir.glob(f"{kernel_name}.c"))
+        kernel_sources = list(set(sources) - set(linked_source))
+
         jit_args = list(reference_dir.glob("*jit_args.json"))
         compiler_params = list(reference_dir.glob("*params.json"))
 
-        return AOTScriptResult(headers, sources, jit_args, compiler_params)
-
-    def test_script_gen(self, kernel_name, reference_dir, kernel_configs, kernel_path):
-        signatures = [
-            generate_signature(
-                kernel_config.dtypes, kernel_config.hints, kernel_config.constants
-            )
-            for kernel_config in kernel_configs
-        ]
-
-        num_warps = [kernel_config.num_warps for kernel_config in kernel_configs]
-        grids = [kernel_config.grid for kernel_config in kernel_configs]
-
-        AOTScriptRunner.compile_matmul_kernels(
-            kernel_name,
-            signatures,
-            num_warps=num_warps,
-            grids=grids,
-            out_dir=reference_dir,
-            kernel_path=kernel_path,
+        return AOTScriptResult(
+            kernel_headers=kernel_headers,
+            kernel_sources=kernel_sources,
+            linked_header=linked_header,
+            linked_source=linked_source,
+            jit_args=jit_args,
+            compiler_params=compiler_params,
         )
-        headers = list(reference_dir.glob("*.h"))
-        sources = list(reference_dir.glob("*.c"))
-        jit_args = list(reference_dir.glob("*jit_args.json"))
-        compiler_params = list(reference_dir.glob("*params.json"))
+
+    def test_script_gen(self, expected_kernels):
+        assert len(expected_kernels.linked_header) == 1
+        assert len(expected_kernels.kernel_headers) >= 1
+
+        assert len(expected_kernels.linked_source) == 1
+        assert len(expected_kernels.kernel_sources) >= 1
 
     def test_script_files(self, expected_kernels):
         headers, sources, jit_args, compiler_params = expected_kernels
@@ -257,7 +255,12 @@ class TestMatMulCodegen:
 
             INT = ["num_warps", "num_stages", "num_ctas", "device"]
             STRING = ["device_type"]
-            DICT = ["signature", "constants"]
+            DICT = [
+                "signature",
+                "constants",
+                "_original_signature",
+                "_original_constants",
+            ]
             LIST = ["grid", "configs"]
             BOOL = ["enable_warp_specialization", "enable_fp_fusion", "debug"]
 
@@ -275,13 +278,8 @@ class TestMatMulCodegen:
                             parsed_args[k] = False
                         else:
                             raise ValueError(f"Invalid bool value {v}")
-                    elif k in [
-                        "constants",
-                        "_original_constants",
-                        "signature",
-                        "_original_signature",
-                    ]:
-                        # Cast arg positions to ints
+                    elif k in JITArgTypes.DICT:
+                        # Cast arg positions to ints for signature and constants
                         parsed_args[k] = {int(k): v for k, v in v.items()}
                     elif k == "configs":
                         # Create instance descriptors from dict representation
@@ -293,15 +291,8 @@ class TestMatMulCodegen:
         raw_args = json.load(args_path.open())
         return JITArgDeserializer.deserialize(raw_args)
 
-    def test_aot_compiler(
-        self,
-        expected_kernels,
-        kernel_name,
-        kernel_path,
-        codegen_dir,
-    ) -> List[AOTCompilationResult]:
-        # Load
-        # headers, sources, jit_args, compiler_params = self.expected_kernels
+    @pytest.fixture(scope="class")
+    def codegen_kernels(self, kernel_name, kernel_path, expected_kernels, codegen_dir):
         jit_args = []
         for p in expected_kernels.jit_args:
             jit_args.append(self._parse_jit_args(p))
@@ -318,16 +309,34 @@ class TestMatMulCodegen:
             )
             compiled_result: AOTCompilationResult = compiler.generate()
             compiled_results.append(compiled_result)
+        return compiled_results
 
-        for res, compiler_params in zip(
-            compiled_results, expected_kernels.compiler_params
-        ):
-            expected = json.load(compiler_params.open())
-            actual = res._compiler_params
+    def test_aot_compiler_params(
+        self,
+        expected_kernels,
+        codegen_kernels,
+    ) -> List[AOTCompilationResult]:
+        # Load
+        # headers, sources, jit_args, compiler_params = self.expected_kernels
+        actual_params = [k._compiler_params for k in codegen_kernels]
+        for actual, expected in zip(actual_params, expected_kernels.compiler_params):
+            expected = json.load(expected.open())
             for k in actual.keys():
                 assert (
                     actual[k] == expected[k]
                 ), f"{k.upper()} not equal\n\tExpected: {expected[k]}, Actual: {actual[k]}"
+
+    def test_aot_codegen(
+        self,
+        expected_kernels,
+        codegen_kernels,
+    ) -> List[AOTCompilationResult]:
+        # Load
+        # headers, sources, jit_args, compiler_params = self.expected_kernels
+        actual_headers = [k.header for k in codegen_kernels]
+        for actual, expected in zip(actual_headers, expected_kernels.headers):
+            expected = expected.read_text()
+            check_codegen(actual, expected)
 
 
 @pytest.mark.skip(
