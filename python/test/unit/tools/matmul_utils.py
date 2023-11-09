@@ -108,31 +108,31 @@ class AOTScriptRunner:
             )
             AOTScriptRunner.link_aot_kernels(out_dir, kernel_name)
 
+    @staticmethod
+    def generate_signature(
+        dtypes: OrderedDict,
+        hints: OrderedDict,
+        constant_vals: OrderedDict,
+    ):
+        assert set(dtypes.keys()) == set(MATMUL_ARGS)
+        assert set(hints.keys()) == set(MATMUL_ARGS)
 
-def generate_signature(
-    dtypes: OrderedDict,
-    hints: OrderedDict,
-    constant_vals: OrderedDict,
-):
-    assert set(dtypes.keys()) == set(MATMUL_ARGS)
-    assert set(hints.keys()) == set(MATMUL_ARGS)
+        args = []
+        for arg in MATMUL_ARGS:
+            dtype = dtypes[arg]
+            hint = hints[arg]
+            if hint:
+                args.append(f"{dtype}:{str(hint)}")
+            else:
+                args.append(f"{dtype}")
 
-    args = []
-    for arg in MATMUL_ARGS:
-        dtype = dtypes[arg]
-        hint = hints[arg]
-        if hint:
-            args.append(f"{dtype}:{str(hint)}")
-        else:
-            args.append(f"{dtype}")
-
-    args_str = ", ".join(args)
-    consts = []
-    for const in MATMUL_CONSTANTS:
-        consts.append(f"{constant_vals[const]}")
-    consts_str = ", ".join(consts)
-    signature = ", ".join([args_str, consts_str])
-    return signature
+        args_str = ", ".join(args)
+        consts = []
+        for const in MATMUL_CONSTANTS:
+            consts.append(f"{constant_vals[const]}")
+        consts_str = ", ".join(consts)
+        signature = ", ".join([args_str, consts_str])
+        return signature
 
 
 @dataclass

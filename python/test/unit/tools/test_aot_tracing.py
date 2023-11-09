@@ -19,9 +19,11 @@ from .matmul_configs import *
 from .matmul_utils import *
 
 # ------------------------------------------------------------------------------------------------------------ #
+# Tests for `AOTScriptRunner`, which is a wrapper around `triton.tools.compile` and `triton.tools.link`
 
 
-## Test generate_signature given different dtypes, hints, and constants -- see `matmul_configs.py` for details
+## Test `generate_signature` for creating signatures to pass to `triton.tools.compile` CLI given dtypes, hints, and constants.
+# See `matmul_configs.py` for details
 @pytest.mark.parametrize(
     "dtypes, hints, constants, expected_signature",
     [
@@ -53,8 +55,8 @@ from .matmul_utils import *
     ],
     ids=["default", "no_hints", "stride_cm", "stride_am", "stride_cm_am"],
 )
-def test_default_signature(dtypes, hints, constants, expected_signature):
-    signature = generate_signature(
+def test_signature(dtypes, hints, constants, expected_signature):
+    signature = AOTScriptRunner.generate_signature(
         dtypes=dtypes,
         hints=hints,
         constant_vals=constants,
@@ -65,7 +67,8 @@ def test_default_signature(dtypes, hints, constants, expected_signature):
     ), f"Expected signature: {expected_signature}, Actual signature: {signature}"
 
 
-## Test scripted runner for generating reference kernels
+## Test wrapper for `triton.tools.compile` for generating reference kernels
+# See
 def test_kernel_compilation():
     out_dir = FIXTURES_DIR / "aot_reference_kernels"
     if out_dir.exists():
@@ -83,13 +86,34 @@ def test_kernel_compilation():
 
 
 """
-Replicate the compiled kernel headers and sources for matmul kernels in `test_aot.py`
+Tests to replicate the matmul kernels in `test_aot.py` using the refactored object-oriented AOTCompiler and AOTLinker classes.
+Currently AOTCompiler and AOTLinker are abstract classes for generating kernel headers / sources and linking these into dispatchable kernels.
+The AOT_C_CUDA_Compiler and AOT_C_CUDA_Linker classes are concrete implementations of these abstract classes for generating C/CUDA kernels.
+
+See `triton/tools/aot/compiler.py` and `triton/tools/aot/linker.py` for details.
+
     - "default" - no specialization for `stride_cm`, `stride_am`
+    ```
+    {
+        "C": 16,
+        "A": 16,
+        "B": 16,
+        "M": None,
+        "N": None,
+        "K": None,
+        "stride_cm": None,
+        "stride_cn": 1,
+        "stride_am": None,
+        "stride_ak": 1,
+        "stride_bk": 16,
+        "stride_bn": 1,
+    }
+    ```
     - "stride_cm" - `stride_cm` specialized to 16
     - "stride_am" - `stride_am` specialized to 16
     - "stride_cm_am" - `stride_cm` and `stride_am` specialized to 16
 
-Additionally test cases:
+Additional test cases:
     - "no_hints" - no specialization for any arg
     - "all_hints" - specialization for all args
 
@@ -153,6 +177,9 @@ class TestMatMulCodegen:
             ("all_hints",),
             ("no_hints",),
             ("default",),
+            ("stride_cm",),
+            ("stride_am",),
+            ("stride_cm_am",),
         ],  # ("no_hints",),
         ids=lambda params: "|".join([p.upper() for p in params]),
     )
@@ -202,7 +229,7 @@ class TestMatMulCodegen:
         self, kernel_name, reference_dir: Path, kernel_configs, kernel_path: Path
     ):
         signatures = [
-            generate_signature(
+            AOTScriptRunner.generate_signature(
                 kernel_config.dtypes, kernel_config.hints, kernel_config.constants
             )
             for kernel_config in kernel_configs
@@ -390,6 +417,20 @@ class TestMatMulCodegen:
         )
 
 
+"""
+Tests for tracing JIT functions and generating AOT kernels from the traced functions.
+Motivation is that rather than having the user input a signature, we utilize the existing JIT / compilation machinery to 
+generate the necessary inputs to `triton.compiler.compile`.
+
+AOTTracer is an abstract class for tracing JIT functions and generating AOT kernels from the traced functions that utilizes AOTCompiler 
+and AOTLinker to generate the AOT kernels. 
+
+AOTTracer is implemented by MatMulKernelTracer, which is a concrete implementation of AOTTracer for the matmul kernel.
+
+See `triton/tools/aot/tracing.py` for details.
+"""
+
+
 @pytest.mark.skip(
     reason="Traced Matmul kernels will differ from scripted versions due to handling of specializations"
 )
@@ -445,7 +486,7 @@ class TestMatmulTrace:
         self, kernel_name, reference_aot_dir: Path, kernel_configs, kernel_path: Path
     ):
         signatures = [
-            generate_signature(
+            AOTScriptRunner.generate_signature(
                 kernel_config.dtypes, kernel_config.hints, kernel_config.constants
             )
             for kernel_config in kernel_configs
