@@ -372,6 +372,19 @@ class TestMatMulCodegen:
             expected_kernels.linked_header[0].read_text(),
         )
 
+    def test_aot_codegen_linked_source(
+        self,
+        expected_kernels,
+        codegen_linked_kernels,
+    ) -> List[AOTCompilationResult]:
+        # Load
+        # headers, sources, jit_args, compiler_params = self.expected_kernels
+
+        check_codegen(
+            codegen_linked_kernels.source_path.read_text(),
+            expected_kernels.linked_source[0].read_text(),
+        )
+
     # def test_aot_codegen_kernel_sources(
     #     self,
     #     expected_kernels,
