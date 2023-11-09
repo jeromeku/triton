@@ -242,13 +242,6 @@ class TestMatMulCodegen:
         assert len(expected_kernels.linked_source) == 1
         assert len(expected_kernels.kernel_sources) >= 1
 
-    def test_script_files(self, expected_kernels):
-        headers, sources, jit_args, compiler_params = expected_kernels
-        assert len(headers) >= 1
-        assert len(sources) >= 1
-        assert len(jit_args) >= 1
-        assert len(compiler_params) >= 1
-
     def _parse_jit_args(self, args_path):
         class JITArgTypes:
             """Expected types for JIT args"""
@@ -334,7 +327,9 @@ class TestMatMulCodegen:
         # Load
         # headers, sources, jit_args, compiler_params = self.expected_kernels
         actual_headers = [k.header for k in codegen_kernels]
-        for actual, expected in zip(actual_headers, expected_kernels.headers):
+        for actual, expected in zip(
+            sorted(actual_headers), sorted(expected_kernels.kernel_headers)
+        ):
             expected = expected.read_text()
             check_codegen(actual, expected)
 
