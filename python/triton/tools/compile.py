@@ -110,6 +110,10 @@ if __name__ == "__main__":
     # validate and parse signature
     signature = list(map(lambda s: s.strip(" "), args.signature.split(",")))
 
+    # Save original signature -- mainly for debugging and testing of AOT Compiler class
+    if args.save_args:
+        original_signature = signature
+
     def hash_signature(signature: List[str]):
         m = hashlib.sha256()
         m.update(" ".join(signature).encode())
@@ -135,6 +139,11 @@ if __name__ == "__main__":
     hints = {k: v for k, v in hints.items() if v is not None}
     constexprs = {i: constexpr(s) for i, s in enumerate(signature)}
     constexprs = {k: v for k, v in constexprs.items() if v is not None}
+
+    # Save original constants -- mainly for debugging and testing of AOT Compiler class
+    if args.save_params:
+        original_constants = list(constexprs.values())
+
     signature = {
         i: s.split(":")[0] for i, s in enumerate(signature) if i not in constexprs
     }
@@ -150,6 +159,7 @@ if __name__ == "__main__":
     config = triton.compiler.instance_descriptor(
         divisible_by_16=divisible_by_16, equal_to_1=equal_to_1
     )
+
     for i in equal_to_1:
         constexprs.update({i: 1})
 
@@ -224,9 +234,14 @@ if __name__ == "__main__":
                 "num_warps": args.num_warps,
                 "num_stages": args.num_stages,
                 "grid": cleaned_grid,
+                "_original_signature": original_signature,
+                "_original_constants": original_constants,
             }
             json.dump(serialized_args, fp, indent=2)
     # Dump params
     if args.save_params:
         with out_path.with_suffix(f".{sig_hash}_{suffix}.params.json").open("w") as fp:
-            json.dump({k: str(v) for k, v in params.items()}, fp, indent=2)
+            params["gridX"] = params["gridX"].strip()
+            params["gridY"] = params["gridY"].strip()
+            params["gridZ"] = params["gridZ"].strip()
+            json.dump(params, fp, indent=2)

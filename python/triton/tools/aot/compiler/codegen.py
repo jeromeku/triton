@@ -54,6 +54,9 @@ class JITCompileArgs(dict):
     debug: bool = False
     device: int = None
     device_type: str = None
+    # For debugging / testing purposes when generating from `triton.tools.compile`
+    _original_signature: str = None
+    _original_constants: str = None
 
     def __post_init__(self):
         self.update(self.__dict__)
@@ -193,13 +196,19 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         meta_sig = (
             f'warps{self.jit_args["num_warps"]}xstages{self.jit_args["num_stages"]}'
         )
-        signature_str = [str(s) for s in self.jit_args["signature"].values()]
 
-        # Add constants to signature to match original AOT compile.py where constants are included in the signature
-        # since signature is passed as a user-provided string with all args and constants
-        # This doesn't affect actual kernel implementation but is needed to match the original AOT kernel name.
-        const_str = [str(v) for v in self.jit_args["constants"].values()]
-        # full_signature_str = signature_str + const_str
+        sig = (
+            self.jit_args.get("_original_signature", None)
+            or self.jit_args["signature"].values()
+        )
+        signature_str = [str(s).strip() for s in sig]
+
+        constants = (
+            self.jit_args.get("_original_constants", None)
+            or self.jit_args["constants"].values()
+        )
+
+        const_str = [str(v) for v in constants]
 
         sig_hash = self._hash_signature(signature_str + [meta_sig])
         const_sig = "x".join(const_str)

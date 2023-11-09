@@ -220,6 +220,30 @@ class TestMatMulCodegen:
 
         return AOTScriptResult(headers, sources, jit_args, compiler_params)
 
+    def test_script_gen(self, kernel_name, reference_dir, kernel_configs, kernel_path):
+        signatures = [
+            generate_signature(
+                kernel_config.dtypes, kernel_config.hints, kernel_config.constants
+            )
+            for kernel_config in kernel_configs
+        ]
+
+        num_warps = [kernel_config.num_warps for kernel_config in kernel_configs]
+        grids = [kernel_config.grid for kernel_config in kernel_configs]
+
+        AOTScriptRunner.compile_matmul_kernels(
+            kernel_name,
+            signatures,
+            num_warps=num_warps,
+            grids=grids,
+            out_dir=reference_dir,
+            kernel_path=kernel_path,
+        )
+        headers = list(reference_dir.glob("*.h"))
+        sources = list(reference_dir.glob("*.c"))
+        jit_args = list(reference_dir.glob("*jit_args.json"))
+        compiler_params = list(reference_dir.glob("*params.json"))
+
     def test_script_files(self, expected_kernels):
         headers, sources, jit_args, compiler_params = expected_kernels
         assert len(headers) >= 1
@@ -279,6 +303,7 @@ class TestMatMulCodegen:
 
         compiled_results = []
         for args in jit_args:
+            print(args)
             jit_fn = JITFunction(kernel_path)
             compiler = AOTCompiler(
                 kernel_name=kernel_name,
@@ -288,6 +313,17 @@ class TestMatMulCodegen:
             )
             compiled_result: AOTCompilationResult = compiler.generate()
             compiled_results.append(compiled_result)
+
+        for res, compiler_params in zip(
+            compiled_results, expected_kernels.compiler_params
+        ):
+            expected = json.load(compiler_params.open())
+            actual = res._compiler_params
+            for k in actual.keys():
+                if actual[k] != expected[k]:
+                    print(
+                        f"Key {k} not equal\n\tExpected: {expected[k]}, Actual: {actual[k]}"
+                    )
 
 
 @pytest.mark.skip(
