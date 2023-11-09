@@ -34,7 +34,7 @@ class AOTLinker(ABC):
         kernel_name,
         headers: List[str],
         prefix: Optional[str] = "",
-        trace_dir=None,
+        save_dir=None,
     ):
         """
         Args
@@ -45,7 +45,7 @@ class AOTLinker(ABC):
         self.headers = headers
         # self.out_path = out_path if isinstance(out_path, Path) else Path(out_path)
         self.prefix = prefix
-        self.trace_dir = trace_dir or DEFAULT_TRACE_DIR
+        self.trace_dir = save_dir or DEFAULT_TRACE_DIR
         # Parse headers for kernel linker metadata
         self.header_parser = self.HEADER_PARSER_CLS()
         kernels = self.header_parser.parse(self.headers)

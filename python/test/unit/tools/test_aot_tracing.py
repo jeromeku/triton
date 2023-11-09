@@ -304,6 +304,18 @@ class TestMatMulCodegen:
             compiled_results.append(compiled_result)
         return compiled_results
 
+    @pytest.fixture(scope="class")
+    def codegen_linked_kernels(self, kernel_name, codegen_kernels, codegen_dir: Path):
+        headers = [t.header_path for t in codegen_kernels]
+        linker = AOTLinker(
+            kernel_name=kernel_name,
+            headers=headers,
+            save_dir=codegen_dir,
+        )
+
+        linker_result: AOTLinkerResult = linker.generate()
+        return linker_result
+
     def test_aot_compiler_params(
         self,
         expected_kernels,
@@ -346,6 +358,33 @@ class TestMatMulCodegen:
         ):
             expected = expected.read_text()
             check_codegen(actual, expected)
+
+    def test_aot_codegen_linked_header(
+        self,
+        expected_kernels,
+        codegen_linked_kernels,
+    ) -> List[AOTCompilationResult]:
+        # Load
+        # headers, sources, jit_args, compiler_params = self.expected_kernels
+
+        check_codegen(
+            codegen_linked_kernels.header_path.read_text(),
+            expected_kernels.linked_header[0].read_text(),
+        )
+
+    # def test_aot_codegen_kernel_sources(
+    #     self,
+    #     expected_kernels,
+    #     codegen_kernels,
+    # ) -> List[AOTCompilationResult]:
+    #     # Load
+    #     # headers, sources, jit_args, compiler_params = self.expected_kernels
+    #     actual_sources = [k.source for k in codegen_kernels]
+    #     for actual, expected in zip(
+    #         sorted(actual_sources), sorted(expected_kernels.kernel_sources)
+    #     ):
+    #         expected = expected.read_text()
+    #         check_codegen(actual, expected)
 
 
 @pytest.mark.skip(
