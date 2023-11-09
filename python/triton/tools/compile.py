@@ -104,7 +104,8 @@ if __name__ == "__main__":
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     kernel = getattr(mod, args.kernel_name)
-    grid = args.grid.split(",")
+    # Remove whitespace
+    grid = [g.strip() for g in args.grid.split(",")]
     assert len(grid) == 3
 
     # validate and parse signature
@@ -228,14 +229,13 @@ if __name__ == "__main__":
             for c in [config]:
                 unpacked_configs.append({k: list(v) for k, v in c._asdict().items()})
 
-            cleaned_grid = [g.strip() for g in grid]
             serialized_args = {
                 "signature": signature,
                 "constants": constexprs,
                 "configs": unpacked_configs,
                 "num_warps": args.num_warps,
                 "num_stages": args.num_stages,
-                "grid": cleaned_grid,
+                "grid": grid,
                 "_original_signature": original_signature,
                 "_original_constants": original_constants,
             }

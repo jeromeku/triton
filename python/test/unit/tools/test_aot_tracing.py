@@ -319,7 +319,7 @@ class TestMatMulCodegen:
                     actual[k] == expected[k]
                 ), f"{k.upper()} not equal\n\tExpected: {expected[k]}, Actual: {actual[k]}"
 
-    def test_aot_codegen(
+    def test_aot_codegen_kernel_headers(
         self,
         expected_kernels,
         codegen_kernels,
@@ -329,6 +329,20 @@ class TestMatMulCodegen:
         actual_headers = [k.header for k in codegen_kernels]
         for actual, expected in zip(
             sorted(actual_headers), sorted(expected_kernels.kernel_headers)
+        ):
+            expected = expected.read_text()
+            check_codegen(actual, expected)
+
+    def test_aot_codegen_kernel_sources(
+        self,
+        expected_kernels,
+        codegen_kernels,
+    ) -> List[AOTCompilationResult]:
+        # Load
+        # headers, sources, jit_args, compiler_params = self.expected_kernels
+        actual_sources = [k.source for k in codegen_kernels]
+        for actual, expected in zip(
+            sorted(actual_sources), sorted(expected_kernels.kernel_sources)
         ):
             expected = expected.read_text()
             check_codegen(actual, expected)
