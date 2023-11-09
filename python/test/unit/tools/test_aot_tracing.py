@@ -168,7 +168,44 @@ TEST_CONFIGS = {
     ),
 }
 
+# ------------------------------------------------------------------------------------------------------------ #
 
+
+# Small utilities for checking that generated code matches reference code
+def _preprocess_src(src):
+    return list(filter(lambda x: x.strip(), src.split("\n")))
+
+
+def check_codegen(actual: str, expected: str, ignore: List[str] = None, verbose=False):
+    """Check that the generated code is the same as the reference code
+
+    Checks for exact text line by line. Ignores lines containing text in `ignore`.
+
+    Args:
+        actual (str): generated code
+        expected (str): reference
+        ignore (List[str], optional): skip line if contains text in `ignore`. Defaults to None.
+    """
+    actual_lines, expected_lines = _preprocess_src(actual), _preprocess_src(expected)
+    mismatches = []
+    for lineno, (actual, expected) in enumerate(zip(actual_lines, expected_lines), 1):
+        if ignore and any(i in actual for i in ignore):
+            continue
+        if actual != expected:
+            mismatches.append(
+                (f"Line {lineno}:\n  Actual: {actual}\n  Expected: {expected}")
+            )
+            if verbose:
+                print(
+                    f"Line {lineno} mismatch:\n  Actual: {actual}\n  Expected: {expected}"
+                )
+
+    if mismatches:
+        mismatch_str = "\n".join(mismatches)
+        raise ValueError(f"Mismatches:\n {mismatch_str}")
+
+
+# ------------------------------------------------------------------------------------------------------------ #
 class TestMatMulCodegen:
     @pytest.fixture(
         scope="class",
@@ -427,14 +464,14 @@ and AOTLinker to generate the AOT kernels.
 
 AOTTracer is implemented by MatMulKernelTracer, which is a concrete implementation of AOTTracer for the matmul kernel.
 
+Since traced code will differ from scripted (`triton.tools.compile`) due to handling of specializations and signatures,
+we don't test for exact codegen matches. Instead, we test that the traced kernels are functionally equivalent to the scripted kernels.
+
 See `triton/tools/aot/tracing.py` for details.
 """
 
 
-@pytest.mark.skip(
-    reason="Traced Matmul kernels will differ from scripted versions due to handling of specializations"
-)
-class TestMatmulTrace:
+class TestMatMulTrace:
     @pytest.fixture(
         scope="class",
         params=[("all_hints",)],  # ("no_hints",),
@@ -460,7 +497,7 @@ class TestMatmulTrace:
         return test_dir
 
     @pytest.fixture(scope="class")
-    def reference_aot_dir(self, test_dir):
+    def reference_dir(self, test_dir):
         reference_aot_dir = test_dir / "reference_aot_kernels"
         reference_aot_dir.mkdir(parents=True, exist_ok=True)
         return reference_aot_dir
@@ -483,7 +520,7 @@ class TestMatmulTrace:
 
     @pytest.fixture(scope="class")
     def expected_kernels(
-        self, kernel_name, reference_aot_dir: Path, kernel_configs, kernel_path: Path
+        self, kernel_name, reference_dir: Path, kernel_configs, kernel_path: Path
     ):
         signatures = [
             AOTScriptRunner.generate_signature(
@@ -500,14 +537,30 @@ class TestMatmulTrace:
             signatures,
             num_warps=num_warps,
             grids=grids,
-            out_dir=reference_aot_dir,
+            out_dir=reference_dir,
             kernel_path=kernel_path,
         )
-        headers = list(reference_aot_dir.glob("*.h"))
-        sources = list(reference_aot_dir.glob("*.c"))
+        headers = list(reference_dir.glob("*.h"))
+        sources = list(reference_dir.glob("*.c"))
 
-        return headers, sources
+        linked_header = list(reference_dir.glob(f"{kernel_name}.h"))
+        kernel_headers = list(set(headers) - set(linked_header))
+        linked_source = list(reference_dir.glob(f"{kernel_name}.c"))
+        kernel_sources = list(set(sources) - set(linked_source))
 
+        jit_args = list(reference_dir.glob("*jit_args.json"))
+        compiler_params = list(reference_dir.glob("*params.json"))
+
+        return AOTScriptResult(
+            kernel_headers=kernel_headers,
+            kernel_sources=kernel_sources,
+            linked_header=linked_header,
+            linked_source=linked_source,
+            jit_args=jit_args,
+            compiler_params=compiler_params,
+        )
+
+    # @pytest.fixture(scope="class")
     @pytest.fixture(scope="class")
     def traced_kernels(
         self,
@@ -540,7 +593,7 @@ class TestMatmulTrace:
                 do_not_specialize=do_not_specialize,
                 num_warps=kernel_config.num_warps,
                 trace_dir=trace_dir,
-                trace_grid=kernel_config.grid.split(","),
+                trace_grid=[g.strip() for g in kernel_config.grid.split(",")],
             )
             trace_configs.append(trace_config)
             matmul_configs.append(matmul_config)
@@ -551,8 +604,6 @@ class TestMatmulTrace:
             kernel_configs=matmul_configs, trace_configs=trace_configs
         )
         # Save jit args
-        import json
-
         for trace in traces:
             with open(trace_dir / f"{trace.kernel_name}-jit_args.json", "w") as fp:
                 json.dump({k: str(v) for k, v in trace._jit_args.items()}, fp, indent=2)
@@ -570,7 +621,7 @@ class TestMatmulTrace:
         linker = AOTLinker(
             kernel_name=kernel_name,
             headers=headers,
-            trace_dir=trace_dir,
+            save_dir=trace_dir,
         )
 
         linker_result: AOTLinkerResult = linker.generate()
@@ -579,22 +630,29 @@ class TestMatmulTrace:
     def extract_kernel_sig(self, trace: AOTCompilationResult):
         return "_".join(trace.params["kernel_name"].split("_")[1:])
 
+    @pytest.mark.skip("Sig hash is not the same as the reference kernel")
     def test_kernel_header_files(self, traced_kernels, expected_kernels):
-        headers, _ = expected_kernels
+        (kernel_headers, *_) = expected_kernels
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
-            assert any(kernel_sig in str(h) for h in headers)
+            assert any(kernel_sig in str(h) for h in kernel_headers)
 
+    @pytest.mark.skip(
+        "Need to align generated and scripted signature hashes to compare headers"
+    )
     def test_kernel_header_match(self, traced_kernels, expected_kernels):
-        headers, _ = expected_kernels
+        (expected_headers, *_) = expected_kernels
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
-            expected_header = [h for h in headers if kernel_sig in str(h)][
+            expected_header = [h for h in expected_headers if kernel_sig in str(h)][
                 0
             ].read_text()
             actual_header = trace.header
-            check_codegen(actual_header, expected_header)
+            check_codegen(actual_header, expected_header, verbose=True)
 
+    @pytest.mark.skip(
+        "Need to align generated and scripted signature hashes to compare sources"
+    )
     def test_kernel_source_match(self, traced_kernels, expected_kernels):
         _, sources = expected_kernels
         for trace in traced_kernels:
@@ -606,25 +664,21 @@ class TestMatmulTrace:
             check_codegen(actual_source, expected_source)
 
     def test_linked_header_match(self, kernel_name, linked_traces, expected_kernels):
-        headers, _ = expected_kernels
-        expected_kernel_file = f"{kernel_name}.h"
-        assert expected_kernel_file in [h.name for h in headers]
-        expected_header = [h for h in headers if expected_kernel_file in str(h)][
-            0
-        ].read_text()
+        expected_header = expected_kernels.linked_header[0].read_text()
+
         actual_header = linked_traces.header
-        check_codegen(actual_header, expected_header)
+        check_codegen(actual_header, expected_header, verbose=True)
 
-    def test_linked_source_match(self, kernel_name, linked_traces, expected_kernels):
-        _, sources = expected_kernels
-        expected_kernel_file = f"{kernel_name}.c"
-        assert expected_kernel_file in [s.name for s in sources]
+    # def test_linked_source_match(self, kernel_name, linked_traces, expected_kernels):
+    #     _, sources = expected_kernels
+    #     expected_kernel_file = f"{kernel_name}.c"
+    #     assert expected_kernel_file in [s.name for s in sources]
 
-        expected_source = [s for s in sources if expected_kernel_file in str(s)][
-            0
-        ].read_text()
-        actual_source = linked_traces.source
-        check_codegen(actual_source, expected_source)
+    #     expected_source = [s for s in sources if expected_kernel_file in str(s)][
+    #         0
+    #     ].read_text()
+    #     actual_source = linked_traces.source
+    #     check_codegen(actual_source, expected_source)
 
 
 # @pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
@@ -773,14 +827,3 @@ class TestMatmulTrace:
 # # reference_source = (trace_dir / trace.kernel_name / "matmul.c").read_text()
 # # check_codegen(result.header, reference_header)
 # # check_codegen(result.source, reference_source)
-
-
-def _preprocess_src(src):
-    return list(filter(lambda x: x.strip(), src.split("\n")))
-
-
-def check_codegen(actual: str, expected: str):
-    actual_lines, expected_lines = _preprocess_src(actual), _preprocess_src(expected)
-
-    for actual, expected in zip(actual_lines, expected_lines):
-        assert actual == expected, f"Expected: \n{expected}\nActual: \n{actual}"

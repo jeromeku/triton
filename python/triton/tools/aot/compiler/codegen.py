@@ -29,12 +29,7 @@ class CompiledArtifact:
     kernel_path: str
 
 
-@dataclass
-class Grid:
-    x: int | str
-    y: int | str
-    z: int | str
-
+class Grid(namedtuple("Grid", ["x", "y", "z"])):
     def __str__(self):
         return f"[{self.x}, {self.y}, {self.z}]"
 
@@ -206,7 +201,10 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
             self.jit_args.get("_original_constants", None) or self.jit_args["constants"]
         )
 
-        const_str = [str(v) for v in constants.values()]
+        config = self.jit_args["configs"][0]
+
+        # Match const_sig to the signature in `triton.tools.compile`
+        const_str = [str(v) for k, v in constants.items() if k not in config.equal_to_1]
 
         sig_hash = self._hash_signature(signature_str + [meta_sig])
         const_sig = "x".join(const_str)

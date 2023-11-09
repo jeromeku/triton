@@ -25,8 +25,7 @@ class AOT_Compiler(ABC):
         self.jit_args = jit_args
 
         self.save_dir = save_dir or DEFAULT_TRACE_DIR
-        if compiled_binary is None:
-            self.compiled_binary = triton.compile(jit_fn, **jit_args)
+        self.compiled_binary = compiled_binary or triton.compile(jit_fn, **jit_args)
 
         self.params_builder = self.PARAM_BUILDER_CLS(
             kernel_name=kernel_name,
