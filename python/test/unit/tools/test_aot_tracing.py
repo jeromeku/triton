@@ -188,21 +188,22 @@ def check_codegen(actual: str, expected: str, ignore: List[str] = None, verbose=
     """
     actual_lines, expected_lines = _preprocess_src(actual), _preprocess_src(expected)
     mismatches = []
+
     for lineno, (actual, expected) in enumerate(zip(actual_lines, expected_lines), 1):
         if ignore and any(i in actual for i in ignore):
             continue
         if actual != expected:
-            mismatches.append(
-                (f"Line {lineno}:\n  Actual: {actual}\n  Expected: {expected}")
-            )
+            mismatches.append(lineno)
             if verbose:
                 print(
-                    f"Line {lineno} mismatch:\n  Actual: {actual}\n  Expected: {expected}"
+                    f"Line {lineno} mismatch:\n  Actual: {actual[:100]}\n  Expected: {expected[:100]}"
                 )
-
-    if mismatches:
-        mismatch_str = "\n".join(mismatches)
-        raise ValueError(f"Mismatches:\n {mismatch_str}")
+    assert (
+        not mismatches
+    ), f'Mismatch in generated code at lines {", ".join(str(l) for l in mismatches)}'
+    # if mismatches:
+    #     mismatch_str = "\n".join(mismatches)
+    #     raise ValueError(f"Mismatches:\n {mismatch_str}")
 
 
 # ------------------------------------------------------------------------------------------------------------ #
@@ -465,13 +466,23 @@ and AOTLinker to generate the AOT kernels.
 AOTTracer is implemented by MatMulKernelTracer, which is a concrete implementation of AOTTracer for the matmul kernel.
 
 Since traced code will differ from scripted (`triton.tools.compile`) due to handling of specializations and signatures,
-we don't test for exact codegen matches. Instead, we test that the traced kernels are functionally equivalent to the scripted kernels.
+we don't test for exact codegen matches. In particular, since the AOT script does not handle all specializations in
+the JITTed path such as `ids_of_folded_args` and `divisible_by_8`, any codegen'ed that depend on the `config` passed to 
+`triton.compiler.compile` will necessarily differ.
 
+This includes:
+- the suffix attached generated kernel header and source files
+- fields in the `triton.tools.compile.{h,c}` templates such as `kernel_name` and `triton_kernel_name`
+- the generated cubin image, which will differ due to the differing specializations.
+
+Hence, when comparing the generated code, we skip the aforementioned fields (`SKIP_PARAMS` attribute).
 See `triton/tools/aot/tracing.py` for details.
 """
 
 
 class TestMatMulTrace:
+    SKIP_PARAMS = ["kernel_name", "triton_kernel_name", "bin_size", "bin_data"]
+
     @pytest.fixture(
         scope="class",
         params=[("all_hints",)],  # ("no_hints",),
@@ -627,39 +638,47 @@ class TestMatMulTrace:
         linker_result: AOTLinkerResult = linker.generate()
         return linker_result
 
+    @pytest.fixture
+    def skip_params(self, traced_kernels):
+        skip = {}
+        for trace in traced_kernels:
+            for k, v in trace._compiler_params.items():
+                if k in self.SKIP_PARAMS:
+                    skip[k] = v
+        return skip
+
     def extract_kernel_sig(self, trace: AOTCompilationResult):
         return "_".join(trace.params["kernel_name"].split("_")[1:])
 
-    def test_kernel_header_files(self, traced_kernels, expected_kernels):
+    def test_kernel_header_files(self, traced_kernels, expected_kernels, skip_params):
+        # Skip lines that contain triton.compiler.instance_descriptor `kernel_name` and `triton_kernel_name`
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
-            assert any(kernel_sig in str(h) for h in expected_kernels.kernel_headers)
+            sig_hash_suffix = kernel_sig.split("_")
+            assert len(sig_hash_suffix) == 2
+            sig_hash = sig_hash_suffix[0]
+            assert any(sig_hash in str(h) for h in expected_kernels.kernel_headers)
 
-    @pytest.mark.skip(
-        "Need to align generated and scripted signature hashes to compare headers"
-    )
+    # @pytest.mark.skip(
+    #     "Need to align generated and scripted signature hashes to compare headers"
+    # )
     def test_kernel_header_match(self, traced_kernels, expected_kernels):
-        (expected_headers, *_) = expected_kernels
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
-            expected_header = [h for h in expected_headers if kernel_sig in str(h)][
-                0
-            ].read_text()
+            expected_header = [
+                h for h in expected_kernels.kernel_headers if kernel_sig in str(h)
+            ][0].read_text()
             actual_header = trace.header
             check_codegen(actual_header, expected_header, verbose=True)
 
-    @pytest.mark.skip(
-        "Need to align generated and scripted signature hashes to compare sources"
-    )
     def test_kernel_source_match(self, traced_kernels, expected_kernels):
-        _, sources = expected_kernels
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
-            expected_source = [s for s in sources if kernel_sig in str(s)][
-                0
-            ].read_text()
+            expected_source = [
+                s for s in expected_kernels.kernel_sources if kernel_sig in str(s)
+            ][0].read_text()
             actual_source = trace.source
-            check_codegen(actual_source, expected_source)
+            check_codegen(actual_source, expected_source, verbose=True)
 
     def test_linked_header_match(self, kernel_name, linked_traces, expected_kernels):
         expected_header = expected_kernels.linked_header[0].read_text()

@@ -202,14 +202,6 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
             const_str = [
                 str(v).strip() for v in self.jit_args["_original_constants"].values()
             ]
-        # sig = (
-        #     self.jit_args.get("_original_signature", None) or self.jit_args["signature"]
-        # )
-        # signature_str = [str(s).strip() for s in sig.values()]
-
-        # constants = (
-        #     self.jit_args.get("_original_constants", None) or self.jit_args["constants"]
-        # )
         else:
             # Reconstruct full signature with hints to match scripted sig hash
             full_sig = []
@@ -239,9 +231,14 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         return AOTSignatureArgs(meta_sig, signature_str, sig_hash, const_sig)
 
     def _generate_docstring(self):
-        constants = (
-            self.jit_args.get("_original_constants", None) or self.jit_args["constants"]
-        )
+        if self.jit_args.get("_original_constants", None):
+            constants = self.jit_args.get("_original_constants", None)
+        else:
+            constants = {
+                arg.param.num: arg.value
+                for arg in self.jit_args["kernel_args"]
+                if arg.param.is_constexpr
+            }
         doc_string = [
             f"{self.jit_fn.arg_names[i]}={constants[i]}" for i in constants.keys()
         ]
@@ -270,10 +267,10 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
     def _generate_function_name_params(self, sig_hash: str) -> AOTFunctionNameParams:
         config = self.jit_args["configs"][0]
         # Only include divisible_by_16 and equal_to_1 in suffix
-        partial_config = triton.compiler.instance_descriptor(
-            divisible_by_16=config.divisible_by_16, equal_to_1=config.equal_to_1
-        )
-        suffix = kernel_suffix(self.jit_args["signature"].values(), partial_config)
+        # config = triton.compiler.instance_descriptor(
+        #     divisible_by_16=config.divisible_by_16, equal_to_1=config.equal_to_1
+        # )
+        suffix = kernel_suffix(self.jit_args["signature"].values(), config)
         func_name = "_".join([self.kernel_name, sig_hash, suffix])
         triton_kernel_name = "_".join([self.kernel_name, suffix])
         return AOTFunctionNameParams(
