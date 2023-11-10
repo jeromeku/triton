@@ -128,20 +128,20 @@ class C_CUDA_SourceGenerator(SourceGenerator):
         else:
             return None
 
-    def _make_dispatcher_conditions(self, metas: List[KernelLinkerMeta]):
-        src = ""
-        for meta in sorted(metas, key=lambda m: -m.num_specs):
-            conds = " && ".join(
-                [
-                    self._condition_fn(val, hint)
-                    for val, hint in zip(meta.arg_names, meta.sizes)
-                    if hint is not None
-                ]
-            )
-            src += (
-                f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
-            )  # Edge case where no specializations hence no dispatching required
-        return src
+    # def _make_dispatcher_conditions(self, metas: List[KernelLinkerMeta]):
+    #     src = ""
+    #     for meta in sorted(metas, key=lambda m: -m.num_specs):
+    #         conds = " && ".join(
+    #             [
+    #                 self._condition_fn(val, hint)
+    #                 for val, hint in zip(meta.arg_names, meta.sizes)
+    #                 if hint is not None
+    #             ]
+    #         )
+    #         src += (
+    #             f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
+    #         )  # Edge case where no specializations hence no dispatching required
+    #     return src
 
     def _make_dispatcher_load_defs(self, name, metas):
         src = ""

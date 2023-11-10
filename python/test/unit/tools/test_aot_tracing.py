@@ -79,8 +79,6 @@ def test_kernel_compilation():
     )
     kernel_headers = list(out_dir.glob("*.h"))
     kernel_sources = list(out_dir.glob("*.c"))
-    print(kernel_headers)
-    print(kernel_sources)
     assert len(kernel_headers) == 1
     assert len(kernel_sources) == 1
 
@@ -212,13 +210,14 @@ class TestMatMulCodegen:
         scope="class",
         params=[
             # Single config tests
-            ("all_hints",),
-            ("no_hints",),
             ("default",),
             ("stride_cm",),
             ("stride_am",),
             ("stride_cm_am",),
+            ("all_hints",),
+            ("no_hints",),
             ("all_hints", "no_hints"),
+            ("default", "stride_cm", "stride_am", "stride_cm_am"),
         ],  # ("no_hints",),
         ids=lambda params: "-".join([p.upper() for p in params]),
     )
@@ -362,7 +361,6 @@ class TestMatMulCodegen:
 
         compiled_results = []
         for args in jit_args:
-            print(args)
             jit_fn = JITFunction(kernel_path)
             compiler = AOTCompiler(
                 kernel_name=kernel_name,
@@ -394,7 +392,12 @@ class TestMatMulCodegen:
         # Load
         # headers, sources, jit_args, compiler_params = self.expected_kernels
         actual_params = [k._compiler_params for k in codegen_kernels]
-        for actual, expected in zip(actual_params, expected_kernels.compiler_params):
+        actual_params = sorted(actual_params, key=lambda x: x["kernel_name"])
+        for actual in actual_params:
+            kernel_sig = "_".join(actual["kernel_name"].split("_")[1:])
+            expected = [
+                p for p in expected_kernels.compiler_params if kernel_sig in str(p)
+            ][0]
             expected = json.load(expected.open())
             for k in actual.keys():
                 assert (
