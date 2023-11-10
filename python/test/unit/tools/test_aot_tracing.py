@@ -176,7 +176,7 @@ def _preprocess_src(src):
     return list(filter(lambda x: x.strip(), src.split("\n")))
 
 
-def check_codegen(actual: str, expected: str, ignore: List[str] = None, verbose=False):
+def check_codegen(actual: str, expected: str, skip: List[str] = None, verbose=False):
     """Check that the generated code is the same as the reference code
 
     Checks for exact text line by line. Ignores lines containing text in `ignore`.
@@ -190,7 +190,7 @@ def check_codegen(actual: str, expected: str, ignore: List[str] = None, verbose=
     mismatches = []
 
     for lineno, (actual, expected) in enumerate(zip(actual_lines, expected_lines), 1):
-        if ignore and any(i in actual for i in ignore):
+        if skip and any(i in actual for i in skip):
             continue
         if actual != expected:
             mismatches.append(lineno)
@@ -644,32 +644,37 @@ class TestMatMulTrace:
         for trace in traced_kernels:
             for k, v in trace._compiler_params.items():
                 if k in self.SKIP_PARAMS:
-                    skip[k] = v
+                    skip[k] = str(v)
         return skip
 
     def extract_kernel_sig(self, trace: AOTCompilationResult):
         return "_".join(trace.params["kernel_name"].split("_")[1:])
 
+    # Only test for presence of `sig hash` in header file name
+    # Per above documentation, the suffix will differ due to the differing specializations.
     def test_kernel_header_files(self, traced_kernels, expected_kernels, skip_params):
-        # Skip lines that contain triton.compiler.instance_descriptor `kernel_name` and `triton_kernel_name`
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
             sig_hash_suffix = kernel_sig.split("_")
             assert len(sig_hash_suffix) == 2
+
             sig_hash = sig_hash_suffix[0]
+
             assert any(sig_hash in str(h) for h in expected_kernels.kernel_headers)
 
-    # @pytest.mark.skip(
-    #     "Need to align generated and scripted signature hashes to compare headers"
-    # )
-    def test_kernel_header_match(self, traced_kernels, expected_kernels):
+    def test_kernel_header_match(self, traced_kernels, expected_kernels, skip_params):
         for trace in traced_kernels:
-            kernel_sig = self.extract_kernel_sig(trace)
+            sig_hash = self.extract_kernel_sig(trace).split("_")[0]
             expected_header = [
-                h for h in expected_kernels.kernel_headers if kernel_sig in str(h)
+                h for h in expected_kernels.kernel_headers if sig_hash in str(h)
             ][0].read_text()
             actual_header = trace.header
-            check_codegen(actual_header, expected_header, verbose=True)
+            check_codegen(
+                actual_header,
+                expected_header,
+                skip=list(skip_params.values()),
+                verbose=True,
+            )
 
     def test_kernel_source_match(self, traced_kernels, expected_kernels):
         for trace in traced_kernels:
