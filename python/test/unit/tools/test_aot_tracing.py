@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import List
@@ -214,6 +215,41 @@ def check_codegen(actual: str, expected: str, skip: List[str] = None, verbose=Fa
     # if mismatches:
     #     mismatch_str = "\n".join(mismatches)
     #     raise ValueError(f"Mismatches:\n {mismatch_str}")
+
+
+def check_linked_source(
+    actual: str, expected: str, skip: List[str] = None, verbose=False
+):
+    actual_lines, expected_lines = _preprocess_src(actual), _preprocess_src(expected)
+    mismatches = []
+    for i in range(len(actual_lines)):
+        actual_line = actual_lines[i]
+
+        if actual_line.lstrip().startswith("if") and "return" in actual_lines[i + 1]:
+            # Check that the actual dispatch condition exists in the expected source
+            assert actual_line in expected_lines
+            # Parse return statement for args -- function name won't match because of suffix
+            actual_dispatch_fn = actual_lines[i + 1]
+            match = re.search(r"\((.*?)\)", actual_dispatch_fn)
+            assert match is not None
+            actual_dispatch_args = match.group(1).split(",")
+            expected_dispatch_fn = expected_lines[expected_lines.index(actual_line) + 1]
+            assert "return" in expected_dispatch_fn
+            match = re.search(r"\((.*?)\)", expected_dispatch_fn)
+            assert match is not None
+            expected_dispatch_args = match.group(1).split(",")
+            assert actual_dispatch_args == expected_dispatch_args
+        else:
+            if skip and any(i in actual_line for i in skip):
+                continue
+
+            if actual_line != expected_lines[i]:
+                mismatches.append((i, actual, expected))
+                if verbose:
+                    print(
+                        f"Line {i} mismatch:\n  Actual: {actual[:100]}\n  Expected: {expected[:100]}"
+                    )
+        assert not mismatches
 
 
 # ------------------------------------------------------------------------------------------------------------ #
@@ -747,7 +783,7 @@ class TestMatMulTrace:
         expected_source = expected_kernels.linked_source[0].read_text()
         actual_source = linked_traces.source
 
-        check_codegen(
+        check_linked_source(
             actual_source,
             expected_source,
             skip=link_skips,
