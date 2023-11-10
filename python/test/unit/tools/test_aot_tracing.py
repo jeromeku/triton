@@ -190,12 +190,24 @@ def check_codegen(actual: str, expected: str, skip: List[str] = None, verbose=Fa
     for lineno, (actual, expected) in enumerate(zip(actual_lines, expected_lines), 1):
         if skip and any(i in actual for i in skip):
             continue
+
         if actual != expected:
-            mismatches.append(lineno)
+            mismatches.append((lineno, actual, expected))
             if verbose:
                 print(
                     f"Line {lineno} mismatch:\n  Actual: {actual[:100]}\n  Expected: {expected[:100]}"
                 )
+    # Special handling for linked source code where the order of dispatching conditions can differ
+    # if multiple configs have the same number of specializations
+    # In these cases, we test that the actual dispatching condition exists in the expected code
+    ok_lines = []
+    for i, (_, actual, expected) in enumerate(mismatches):
+        if actual.lstrip().startswith("if") and expected.lstrip().startswith("if"):
+            # test that actual dispatch condition exists in expected source
+            if actual in expected_lines:
+                ok_lines.append(i)
+    mismatches = [m for i, m in enumerate(mismatches) if i not in ok_lines]
+
     assert (
         not mismatches
     ), f'Mismatch in generated code at lines {", ".join(str(l) for l in mismatches)}'
@@ -216,9 +228,10 @@ class TestMatMulCodegen:
             ("stride_cm_am",),
             ("all_hints",),
             ("no_hints",),
+            # Multi config tests
             ("all_hints", "no_hints"),
             ("default", "stride_cm", "stride_am", "stride_cm_am"),
-        ],  # ("no_hints",),
+        ],
         ids=lambda params: "-".join([p.upper() for p in params]),
     )
     def configs(self, request):
@@ -490,12 +503,16 @@ class TestMatMulTrace:
     @pytest.fixture(
         scope="class",
         params=[
-            ("all_hints",),
-            ("no_hints",),
+            # Single config tests
             ("default",),
             ("stride_cm",),
             ("stride_am",),
             ("stride_cm_am",),
+            ("all_hints",),
+            ("no_hints",),
+            # Multi config tests
+            ("all_hints", "no_hints"),
+            ("default", "stride_cm", "stride_am", "stride_cm_am"),
         ],  # ("no_hints",),
         ids=lambda params: "|".join([p.upper() for p in params]),
     )
@@ -650,12 +667,19 @@ class TestMatMulTrace:
         return linker_result
 
     @pytest.fixture
-    def skip_params(self, traced_kernels):
-        skip = {}
+    def link_skips(self, traced_kernels):
+        skip = []
         for trace in traced_kernels:
             for k, v in trace._compiler_params.items():
                 if k in self.SKIP_PARAMS:
-                    skip[k] = str(v)
+                    skip.append(str(v))
+        return skip
+
+    def get_skips(self, trace):
+        skip = {}
+        for k, v in trace._compiler_params.items():
+            if k in self.SKIP_PARAMS:
+                skip[k] = str(v)
         return skip
 
     def extract_kernel_sig(self, trace: AOTCompilationResult):
@@ -666,7 +690,7 @@ class TestMatMulTrace:
 
     # Only test for presence of `sig hash` in header file name
     # Per above documentation, the suffix will differ due to the differing specializations.
-    def test_kernel_header_files(self, traced_kernels, expected_kernels, skip_params):
+    def test_kernel_header_files(self, traced_kernels, expected_kernels):
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
             sig_hash_suffix = kernel_sig.split("_")
@@ -676,47 +700,49 @@ class TestMatMulTrace:
 
             assert any(sig_hash in str(h) for h in expected_kernels.kernel_headers)
 
-    def test_kernel_header_match(self, traced_kernels, expected_kernels, skip_params):
+    def test_kernel_header_match(self, traced_kernels, expected_kernels):
         for trace in traced_kernels:
             sig_hash = self.extract_sig_hash(trace)
             expected_header = [
                 h for h in expected_kernels.kernel_headers if sig_hash in str(h)
             ][0].read_text()
             actual_header = trace.header
+            skip = self.get_skips(trace)
             check_codegen(
                 actual_header,
                 expected_header,
-                skip=list(skip_params.values()),
+                skip=list(skip.values()),
                 verbose=True,
             )
 
-    def test_kernel_source_match(self, traced_kernels, expected_kernels, skip_params):
+    def test_kernel_source_match(self, traced_kernels, expected_kernels):
         for trace in traced_kernels:
             sig_hash = self.extract_sig_hash(trace)
             expected_source = [
                 s for s in expected_kernels.kernel_sources if sig_hash in str(s)
             ][0].read_text()
             actual_source = trace.source
+            skip = self.get_skips(trace)
             check_codegen(
                 actual_source,
                 expected_source,
-                skip=list(skip_params.values()),
+                skip=list(skip.values()),
                 verbose=True,
             )
 
-    def test_linked_header_match(self, linked_traces, expected_kernels, skip_params):
+    def test_linked_header_match(self, linked_traces, expected_kernels, link_skips):
         expected_header = expected_kernels.linked_header[0].read_text()
         actual_header = linked_traces.header
 
         check_codegen(
             actual_header,
             expected_header,
-            skip=list(skip_params.values()),
+            skip=link_skips,
             verbose=True,
         )
 
     def test_linked_source_match(
-        self, kernel_name, linked_traces, expected_kernels, skip_params
+        self, kernel_name, linked_traces, expected_kernels, link_skips
     ):
         expected_source = expected_kernels.linked_source[0].read_text()
         actual_source = linked_traces.source
@@ -724,7 +750,7 @@ class TestMatMulTrace:
         check_codegen(
             actual_source,
             expected_source,
-            skip=list(skip_params.values()),
+            skip=link_skips,
             verbose=True,
         )
 
