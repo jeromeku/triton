@@ -226,6 +226,10 @@ def check_linked_source(
         actual_line = actual_lines[i]
 
         if actual_line.lstrip().startswith("if") and "return" in actual_lines[i + 1]:
+            if verbose:
+                print(
+                    f"Checking dispatch condition:\nActual: {actual_line}\n{actual_lines[i+1]}"
+                )
             # Check that the actual dispatch condition exists in the expected source
             assert actual_line in expected_lines
             # Parse return statement for args -- function name won't match because of suffix
@@ -233,7 +237,10 @@ def check_linked_source(
             match = re.search(r"\((.*?)\)", actual_dispatch_fn)
             assert match is not None
             actual_dispatch_args = match.group(1).split(",")
+            expected_line = expected_lines[expected_lines.index(actual_line)]
             expected_dispatch_fn = expected_lines[expected_lines.index(actual_line) + 1]
+            if verbose:
+                print(f"Expected: {expected_line}\n{expected_dispatch_fn}")
             assert "return" in expected_dispatch_fn
             match = re.search(r"\((.*?)\)", expected_dispatch_fn)
             assert match is not None
@@ -550,7 +557,7 @@ class TestMatMulTrace:
             ("all_hints", "no_hints"),
             ("default", "stride_cm", "stride_am", "stride_cm_am"),
         ],  # ("no_hints",),
-        ids=lambda params: "|".join([p.upper() for p in params]),
+        ids=lambda params: "-".join([p.upper() for p in params]),
     )
     def configs(self, request):
         return request.param
