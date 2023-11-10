@@ -164,28 +164,40 @@ class C_CUDA_SourceGenerator(SourceGenerator):
         fn_sig = ""
         for meta in sorted(metas, key=lambda m: -m.num_specs):
             fn_sig += f"CUresult {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(CUstream stream, {self.SIGNATURE_GENERATOR.gen_signature(meta)});\n"
-        # src += "\n"
 
         kernel_sig = f"CUresult {name}(CUstream stream, {self.SIGNATURE_GENERATOR.gen_signature_with_full_args(metas[-1])}){{"
-        # src += "\n"
 
-        dispatcher_conds = self._make_dispatcher_conditions(metas)
+        src = "\n".join([docs_str + fn_sig, kernel_sig]) + "\n"
+        for meta in sorted(metas, key=lambda m: -m.num_specs):
+            conds = " && ".join(
+                [
+                    self._condition_fn(val, hint)
+                    for val, hint in zip(meta.arg_names, meta.sizes)
+                    if hint is not None
+                ]
+            )
+            src += (
+                f"  if ({conds})\n" if any(meta.sizes) else "if (1)\n"
+            )  # Edge case where no special
+            #        dispatcher_conds = self._make_dispatcher_conditions(metas)
 
-        arg_names = [arg for arg, hint in zip(meta.arg_names, meta.sizes) if hint != 1]
-        return_statements = f"    return {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(stream, {', '.join(arg_names)});\n"
-        return_statements += "\n"
-        return_statements += "  return CUDA_ERROR_INVALID_VALUE;\n"
-        return_statements += "}\n"
+            arg_names = [
+                arg for arg, hint in zip(meta.arg_names, meta.sizes) if hint != 1
+            ]
+            src += f"    return {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(stream, {', '.join(arg_names)});\n"
+        src += "\n"
+        src += "  return CUDA_ERROR_INVALID_VALUE;\n"
+        src += "}\n"
 
         load_defs = self._make_dispatcher_load_defs(name, metas)
-
-        src = "\n".join(
-            [
-                docs_str + fn_sig,
-                kernel_sig,
-                dispatcher_conds + return_statements + load_defs,
-            ]
-        )
+        src += "\n" + load_defs
+        # src = "\n".join(
+        #     [
+        #         docs_str + fn_sig,
+        #         kernel_sig,
+        #         dispatcher_conds + return_statements + load_defs,
+        #     ]
+        # )
         return src
 
     def _make_defs(self):

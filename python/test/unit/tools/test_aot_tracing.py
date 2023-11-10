@@ -218,8 +218,9 @@ class TestMatMulCodegen:
             ("stride_cm",),
             ("stride_am",),
             ("stride_cm_am",),
+            ("all_hints", "no_hints"),
         ],  # ("no_hints",),
-        ids=lambda params: "|".join([p.upper() for p in params]),
+        ids=lambda params: "-".join([p.upper() for p in params]),
     )
     def configs(self, request):
         return request.param
