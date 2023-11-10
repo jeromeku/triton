@@ -686,6 +686,8 @@ class JITFunction(KernelInterface[T]):
                 debug=self.debug,
                 device_type=device_type,
                 grid=g,
+                trace=True,
+                kernel_args=args,
             )
             compiler = AOTCompiler(
                 kernel_name=kernel_name,

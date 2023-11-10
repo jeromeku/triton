@@ -630,7 +630,6 @@ class TestMatMulTrace:
     def extract_kernel_sig(self, trace: AOTCompilationResult):
         return "_".join(trace.params["kernel_name"].split("_")[1:])
 
-    @pytest.mark.skip("Sig hash is not the same as the reference kernel")
     def test_kernel_header_files(self, traced_kernels, expected_kernels):
         (kernel_headers, *_) = expected_kernels
         for trace in traced_kernels:

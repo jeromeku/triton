@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import triton
 from .. import DEFAULT_TRACE_DIR
 from .codegen import AOT_C_CUDA_ParamsBuilder, AOTCompilerParamsBuilder, JITCompileArgs
-from triton.compiler.compiler import CompiledKernel, instance_descriptor
+from triton.compiler.compiler import CompiledKernel
 from triton.runtime.jit import JITFunction
 
 
