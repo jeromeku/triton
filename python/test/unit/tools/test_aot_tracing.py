@@ -693,22 +693,29 @@ class TestMatMulTrace:
                 verbose=True,
             )
 
-    def test_linked_header_match(self, kernel_name, linked_traces, expected_kernels):
+    def test_linked_header_match(self, linked_traces, expected_kernels, skip_params):
         expected_header = expected_kernels.linked_header[0].read_text()
-
         actual_header = linked_traces.header
-        check_codegen(actual_header, expected_header, verbose=True)
 
-    # def test_linked_source_match(self, kernel_name, linked_traces, expected_kernels):
-    #     _, sources = expected_kernels
-    #     expected_kernel_file = f"{kernel_name}.c"
-    #     assert expected_kernel_file in [s.name for s in sources]
+        check_codegen(
+            actual_header,
+            expected_header,
+            skip=list(skip_params.values()),
+            verbose=True,
+        )
 
-    #     expected_source = [s for s in sources if expected_kernel_file in str(s)][
-    #         0
-    #     ].read_text()
-    #     actual_source = linked_traces.source
-    #     check_codegen(actual_source, expected_source)
+    def test_linked_source_match(
+        self, kernel_name, linked_traces, expected_kernels, skip_params
+    ):
+        expected_source = expected_kernels.linked_source[0].read_text()
+        actual_source = linked_traces.source
+
+        check_codegen(
+            actual_source,
+            expected_source,
+            skip=list(skip_params.values()),
+            verbose=True,
+        )
 
 
 # @pytest.mark.parametrize("config_name", [("no_hints")], ids=lambda x: x.upper())
