@@ -650,6 +650,9 @@ class TestMatMulTrace:
     def extract_kernel_sig(self, trace: AOTCompilationResult):
         return "_".join(trace.params["kernel_name"].split("_")[1:])
 
+    def extract_sig_hash(self, trace: AOTCompilationResult):
+        return self.extract_kernel_sig(trace).split("_")[0]
+
     # Only test for presence of `sig hash` in header file name
     # Per above documentation, the suffix will differ due to the differing specializations.
     def test_kernel_header_files(self, traced_kernels, expected_kernels, skip_params):
@@ -664,7 +667,7 @@ class TestMatMulTrace:
 
     def test_kernel_header_match(self, traced_kernels, expected_kernels, skip_params):
         for trace in traced_kernels:
-            sig_hash = self.extract_kernel_sig(trace).split("_")[0]
+            sig_hash = self.extract_sig_hash(trace)
             expected_header = [
                 h for h in expected_kernels.kernel_headers if sig_hash in str(h)
             ][0].read_text()
@@ -676,14 +679,19 @@ class TestMatMulTrace:
                 verbose=True,
             )
 
-    def test_kernel_source_match(self, traced_kernels, expected_kernels):
+    def test_kernel_source_match(self, traced_kernels, expected_kernels, skip_params):
         for trace in traced_kernels:
-            kernel_sig = self.extract_kernel_sig(trace)
+            sig_hash = self.extract_sig_hash(trace)
             expected_source = [
-                s for s in expected_kernels.kernel_sources if kernel_sig in str(s)
+                s for s in expected_kernels.kernel_sources if sig_hash in str(s)
             ][0].read_text()
             actual_source = trace.source
-            check_codegen(actual_source, expected_source, verbose=True)
+            check_codegen(
+                actual_source,
+                expected_source,
+                skip=list(skip_params.values()),
+                verbose=True,
+            )
 
     def test_linked_header_match(self, kernel_name, linked_traces, expected_kernels):
         expected_header = expected_kernels.linked_header[0].read_text()
