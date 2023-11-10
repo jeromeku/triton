@@ -631,10 +631,9 @@ class TestMatMulTrace:
         return "_".join(trace.params["kernel_name"].split("_")[1:])
 
     def test_kernel_header_files(self, traced_kernels, expected_kernels):
-        (kernel_headers, *_) = expected_kernels
         for trace in traced_kernels:
             kernel_sig = self.extract_kernel_sig(trace)
-            assert any(kernel_sig in str(h) for h in kernel_headers)
+            assert any(kernel_sig in str(h) for h in expected_kernels.kernel_headers)
 
     @pytest.mark.skip(
         "Need to align generated and scripted signature hashes to compare headers"

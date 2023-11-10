@@ -17,11 +17,6 @@ from triton.compiler.compiler import CompiledKernel
 from triton.compiler.make_launcher import ty_to_cpp
 from triton.runtime.jit import JITFunction, KernelArg
 
-InstanceDescriptor = namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-)
-
 
 @dataclass
 class CompiledArtifact:
@@ -38,7 +33,7 @@ class Grid(namedtuple("Grid", ["x", "y", "z"])):
 class JITCompileArgs(dict):
     signature: Dict[int, str]
     constants: Dict[int, int]
-    configs: tuple[InstanceDescriptor]
+    configs: tuple[triton.compiler.instance_descriptor]
     num_warps: int
     num_stages: int
     grid: Grid = None
@@ -51,7 +46,6 @@ class JITCompileArgs(dict):
     device_type: str = None
 
     # Additional options for tracing needed to match sig hash / const sig of scripted kernels
-    trace: bool = False
     kernel_args: List[KernelArg] = None
     # For debugging / testing purposes when generating from `triton.tools.compile`
     _original_signature: str = None
@@ -196,6 +190,18 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
             f'warps{self.jit_args["num_warps"]}xstages{self.jit_args["num_stages"]}'
         )
 
+        config = self.jit_args["configs"][0]
+
+        # Case when using AOT compiler from triton.tools.compile
+        if self.jit_args.get("_original_signature", None) and self.jit_args.get(
+            "_original_constants", None
+        ):
+            signature_str = [
+                str(v).strip() for v in self.jit_args["_original_signature"].values()
+            ]
+            const_str = [
+                str(v).strip() for v in self.jit_args["_original_constants"].values()
+            ]
         # sig = (
         #     self.jit_args.get("_original_signature", None) or self.jit_args["signature"]
         # )
@@ -204,46 +210,30 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
         # constants = (
         #     self.jit_args.get("_original_constants", None) or self.jit_args["constants"]
         # )
+        else:
+            # Reconstruct full signature with hints to match scripted sig hash
+            full_sig = []
+            signature = self.jit_args["signature"]
+            for k in signature.keys():
+                if k in config.divisible_by_16:
+                    full_sig.append(f"{signature[k]}" + ":16")
+                elif k in config.equal_to_1:
+                    full_sig.append(f"{signature[k]}" + ":1")
+                else:
+                    full_sig.append(f"{signature[k]}")
+            full_sig = dict(zip(signature.keys(), full_sig))
 
-        config = self.jit_args["configs"][0]
-        print(f"CONFIG {config}")
-        constants = {
-            arg.param.num: arg.value
-            for arg in self.jit_args["kernel_args"]
-            if arg.param.is_constexpr
-        }
-        print(f"CONSTANTS: {constants}")
-        # Reconstruct full signature with hints
-        full_sig = []
-        signature = self.jit_args["signature"]
-        print(f"SIGNATURE: {signature}")
-        for k in self.jit_args["signature"].keys():
-            if k in config.divisible_by_16:
-                full_sig.append(f"{signature[k]}" + ":16")
-            elif k in config.equal_to_1:
-                full_sig.append(f"{signature[k]}" + ":1")
-            else:
-                full_sig.append(f"{signature[k]}")
-        full_sig = dict(zip(signature.keys(), full_sig))
-        all_args = {**full_sig, **constants}
-        signature_str = [str(all_args[k]).strip() for k in sorted(all_args)]
+            # Get constants from kernel_args, removing args specialized to 1
+            constants = {
+                arg.param.num: arg.value
+                for arg in self.jit_args["kernel_args"]
+                if arg.param.is_constexpr
+            }
+            all_args = {**full_sig, **constants}
+            signature_str = [str(all_args[k]).strip() for k in sorted(all_args)]
+            const_str = [str(v) for k, v in constants.items()]
 
-        print(f"Sig str: {signature_str}")
-
-        # constexprs = {k: v for k, v in constants.items() if k not in sig.keys()}
-        # all_args = {**sig, **constexprs}
-        # # print(f"ALL ARGS: {all_args}")
-        # full_sig = [str(all_args[k]).strip() for k in sorted(all_args)]
-        # print(f"FULL SIG: {full_sig}")
-        # all_args = sorted({**sig, **constants})
-
-        # sig_str_consts = [str(constants[k]) for k in constants.keys() if ]
-        # full_sig = signature_str + [str(v).strip() for v in constants.values()]
         sig_hash = self._hash_signature(signature_str + [meta_sig])
-
-        # Match const_sig to the signature in `triton.tools.compile`
-        const_str = [str(v) for k, v in constants.items()]
-        print(f"CONST STR: {const_str}")
         const_sig = "x".join(const_str)
 
         return AOTSignatureArgs(meta_sig, signature_str, sig_hash, const_sig)
@@ -279,7 +269,11 @@ class AOT_C_CUDA_ParamsBuilder(AOTCompilerParamsBuilder):
 
     def _generate_function_name_params(self, sig_hash: str) -> AOTFunctionNameParams:
         config = self.jit_args["configs"][0]
-        suffix = kernel_suffix(self.jit_args["signature"].values(), config)
+        # Only include divisible_by_16 and equal_to_1 in suffix
+        partial_config = triton.compiler.instance_descriptor(
+            divisible_by_16=config.divisible_by_16, equal_to_1=config.equal_to_1
+        )
+        suffix = kernel_suffix(self.jit_args["signature"].values(), partial_config)
         func_name = "_".join([self.kernel_name, sig_hash, suffix])
         triton_kernel_name = "_".join([self.kernel_name, suffix])
         return AOTFunctionNameParams(
