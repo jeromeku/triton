@@ -485,7 +485,7 @@ class TestMatMulTrace:
 
     @pytest.fixture(
         scope="class",
-        params=[("all_hints",)],  # ("no_hints",),
+        params=[("no_hints",), ("all_hints",)],  # ("no_hints",),
         ids=lambda params: "|".join([p.upper() for p in params]),
     )
     def configs(self, request):
