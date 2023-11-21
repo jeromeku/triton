@@ -13,7 +13,7 @@ from .utils import generate_cu_signature
 
 def make_so_cache_key(version_hash, signature, constants, ids, **kwargs):
     # Get unique key for the compiled code
-    signature = {k: 'ptr' if v[0] == '*' else v for k, v in signature.items()}
+    signature = {k: "ptr" if v[0] == "*" else v for k, v in signature.items()}
     key = f"{version_hash}-{''.join(signature.values())}-{constants}-{ids}"
     for kw in kwargs:
         key = f"{key}-{kwargs.get(kw)}"
@@ -23,20 +23,26 @@ def make_so_cache_key(version_hash, signature, constants, ids, **kwargs):
 
 def make_stub(name, signature, constants, ids, **kwargs):
     # name of files that are cached
-    so_cache_key = make_so_cache_key(get_cuda_version_key(), signature, constants, ids, **kwargs)
+    so_cache_key = make_so_cache_key(
+        get_cuda_version_key(), signature, constants, ids, **kwargs
+    )
     so_cache_manager = get_cache_manager(so_cache_key)
     so_name = f"{name}.so"
     # retrieve stub from cache if it exists
     cache_path = so_cache_manager.get_file(so_name)
     if cache_path is None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            src = generate_launcher(constants, signature, ids)
-            src_path = os.path.join(tmpdir, "main.c")
-            with open(src_path, "w") as f:
-                f.write(src)
-            so = _build(name, src_path, tmpdir)
-            with open(so, "rb") as f:
-                return so_cache_manager.put(f.read(), so_name, binary=True)
+        tmpdir = os.path.join(os.path.expanduser("~/.cache/triton"), "stubs")
+        if not os.path.exists(tmpdir):
+            os.makedirs(tmpdir)
+
+        # with tempfile.TemporaryDirectory() as tmpdir:
+        src = generate_launcher(constants, signature, ids)
+        src_path = os.path.join(tmpdir, "main.c")
+        with open(src_path, "w") as f:
+            f.write(src)
+        so = _build(name, src_path, tmpdir)
+        with open(so, "rb") as f:
+            return so_cache_manager.put(f.read(), so_name, binary=True)
     else:
         return cache_path
 
@@ -45,7 +51,7 @@ def make_stub(name, signature, constants, ids, **kwargs):
 
 
 def ty_to_cpp(ty):
-    if ty[0] == '*':
+    if ty[0] == "*":
         return "hipDeviceptr_t" if is_hip() else "CUdeviceptr"
     return {
         "i1": "int32_t",
@@ -67,22 +73,22 @@ def generate_launcher(constants, signature, ids):
     # Record the end of regular arguments;
     # subsequent arguments are architecture-specific descriptors, such as tensor descriptors for CUDA.
     signature, desc_start_idx = generate_cu_signature(constants, signature, ids)
-    arg_decls = ', '.join(f"{ty_to_cpp(ty)} arg{i}" for i, ty in signature.items())
+    arg_decls = ", ".join(f"{ty_to_cpp(ty)} arg{i}" for i, ty in signature.items())
 
     def _extracted_type(ty):
-        if ty[0] == '*':
+        if ty[0] == "*":
             return "PyObject*"
         return {
-            'i1': 'int32_t',
-            'i32': 'int32_t',
-            'i64': 'int64_t',
-            'u32': 'uint32_t',
-            'u64': 'uint64_t',
-            'fp16': 'float',
-            'bf16': 'float',
-            'fp32': 'float',
-            'f32': 'float',
-            'fp64': 'double',
+            "i1": "int32_t",
+            "i32": "int32_t",
+            "i64": "int64_t",
+            "u32": "uint32_t",
+            "u64": "uint64_t",
+            "fp16": "float",
+            "bf16": "float",
+            "fp32": "float",
+            "f32": "float",
+            "fp64": "double",
         }[ty]
 
     def format_of(ty):
@@ -97,13 +103,19 @@ def generate_launcher(constants, signature, ids):
             "int64_t": "L",
         }[ty]
 
-    format = "iiiiiiiiiKKOOO" + ''.join([format_of(_extracted_type(ty)) for ty in signature.values()])
+    format = "iiiiiiiiiKKOOO" + "".join(
+        [format_of(_extracted_type(ty)) for ty in signature.values()]
+    )
 
     # generate glue code
-    folded_without_constexprs = [c for c in ids['ids_of_folded_args'] if c not in ids['ids_of_const_exprs']]
+    folded_without_constexprs = [
+        c for c in ids["ids_of_folded_args"] if c not in ids["ids_of_const_exprs"]
+    ]
     params = [
-        i for i in signature.keys()
-        if i >= desc_start_idx or (i not in constants and i not in folded_without_constexprs)
+        i
+        for i in signature.keys()
+        if i >= desc_start_idx
+        or (i not in constants and i not in folded_without_constexprs)
     ]
     src = f"""
 #include \"cuda.h\"
