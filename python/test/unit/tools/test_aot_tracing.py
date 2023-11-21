@@ -1071,23 +1071,23 @@ def generate_medusa_attn_mask(medusa_choices, device="cuda"):
 import itertools
 import operator
 import random
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import triton.language as tl
 
 
 @dataclass
-class PagedFlashAttentionArgs:
-    output: torch.Tensor
-    query: torch.Tensor  # [num_seqs, num_candidates, num_heads, head_dim]
-    key_cache: torch.Tensor  # [num_blocks, num_heads, head_size // x, block_size, x]
-    value_cache: torch.Tensor  # [num_blocks, num_heads, head_size, block_size]
-    head_mapping: torch.Tensor  # [num_heads]
-    block_tables: torch.Tensor  # [num_seqs, max_num_blocks_per_seq]
-    context_lens: torch.Tensor  # [num_seqs]
-    medusa_attn_mask: torch.Tensor
-    scale: float
-    num_candidates: int
+class DataClassDict:
+    def __post_init__(self):
+        self.update(self.__dict__)
+
+    def __iter__(self):
+        return iter(self.__dict__.values())
+
+
+@dataclass(kw_only=True)
+class PagedFlashAttentionStrideArgs(DataClassDict):
     stride_ob: int
     stride_os: int
     stride_oh: int
@@ -1109,9 +1109,10 @@ class PagedFlashAttentionArgs:
     stride_btb: int
     stride_mm_row: int
     stride_mm_col: int
-    key_block_index: torch.Tensor
-    key_head_index: torch.Tensor
-    value_block_index: torch.Tensor
+
+
+@dataclass(kw_only=True)
+class PagedFlashAttentionConstants(DataClassDict):
     BLOCK_M: tl.constexpr
     BLOCK_DMODEL: tl.constexpr
     BLOCK_N: tl.constexpr
@@ -1121,8 +1122,64 @@ class PagedFlashAttentionArgs:
     X: tl.constexpr
 
 
+@dataclass(kw_only=True)
+class PagedFlashAttentionCacheArgs(DataClassDict):
+    key_cache: torch.Tensor  # [num_blocks, num_heads, head_size // x, block_size, x]
+    value_cache: torch.Tensor  # [num_blocks, num_heads, head_size, block_size]
+    head_mapping: torch.Tensor  # [num_heads]
+    block_tables: torch.Tensor  # [num_seqs, max_num_blocks_per_seq]
+    context_lens: torch.Tensor  # [num_seqs]
+
+
+@dataclass(kw_only=True)
+class PagedFlashAttentionIndexArgs(DataClassDict):
+    key_block_idx: torch.Tensor
+    key_head_idx: torch.Tensor
+    value_block_idx: torch.Tensor
+
+
+@dataclass(kw_only=True)
+class PagedFlashAttentionInputOutputArgs(DataClassDict):
+    output: torch.Tensor
+    query: torch.Tensor  # [num_seqs, num_candidates, num_heads, head_dim]
+
+
+@dataclass(kw_only=True)
+class PagedFlashAttentionMedusaArgs(DataClassDict):
+    medusa_attn_mask: torch.Tensor
+    scale: float
+    num_candidates: int
+
+
+@dataclass(kw_only=True)
+class PagedFlashAttentionArgs(DataClassDict):
+    input_output_args: PagedFlashAttentionInputOutputArgs
+    cache_args: PagedFlashAttentionCacheArgs
+    medusa_args: PagedFlashAttentionMedusaArgs
+    stride_args: PagedFlashAttentionStrideArgs
+    index_args: PagedFlashAttentionIndexArgs
+    constants: PagedFlashAttentionConstants
+
+    def __post_init__(self):
+        super().__post_init__(self)
+
+        full_args = OrderedDict(
+            **self.input_output_args,
+            **self.cache_args,
+            **self.medusa_args,
+            **self.stride_args,
+            **self.index_args,
+            **self.constants,
+        )
+        self.__dict__.update(full_args)
+
+        # self.__dict__.pop("cache_args")
+        # self.__dict__.pop("stride_args")
+        # self.__dict__.pop("constants")
+
+
 @dataclass
-class SingleQueryArgs:
+class SingleQueryArgs(DataClassDict):
     num_sequences: int
     num_heads: int
     head_size: int
@@ -1133,36 +1190,26 @@ class SingleQueryArgs:
     medusa_choices: List[int] = None
 
 
-SINGLE_QUERY_CONFIG = [(7, 40, 16, 128, 10240, torch.float16, [1, 3, 4])]
+SINGLE_QUERY_CONFIG = [SingleQueryArgs(7, 40, 16, 128, 10240, torch.float16, [1, 3, 4])]
 
 
-@pytest.mark.parametrize("query_config", SINGLE_QUERY_CONFIG)
-def test_trace_kernel(
-    kernel_path,
-) -> List[AOTCompilationResult]:
-    kernel_path = "/notebooks/torch-extensions/extension_builder/triton-aot/python/test/unit/tools/fixtures/kernels/triton-paged-attention/paged_attention.py"
-    trace_dir = Path(__file__).parent / kernel_path.name.split(".")[0]
-
-    if trace_dir.exists():
-        shutil.rmtree(trace_dir)
-    trace_dir.mkdir(parents=True, exist_ok=True)
-
-    query_config = SingleQueryArgs(*query_config)
-
-    # block_size = 16
-    # head_size = 128
-    # dtype = torch.float16
-    # num_sequences = 7
-    # num_heads = 40
-    # medusa_choices = [1, 3, 4]
-    # num_blocks = (10240,)
-    MAX_SEQ_LEN = 2048
-    TEST_SEED = 0
-
+def construct_paged_fa_args(
+    num_sequences,
+    num_heads,
+    head_size,
+    block_size,
+    num_blocks,
+    dtype,
+    num_kv_heads,
+    medusa_choices,
+    MAX_SEQ_LEN,
+    BLOCK_M=16,
+    BLOCK_N=128,
+):
     medusa_candidates = sum(itertools.accumulate(medusa_choices, operator.mul))
-
     medusa_attn_mask = generate_medusa_attn_mask(medusa_choices, device="cuda")
 
+    # Input / Output Args
     qkv = torch.empty(
         num_sequences,
         medusa_candidates,
@@ -1177,12 +1224,37 @@ def test_trace_kernel(
     # query shape: [num_sequences, medusa_candidates, num_heads, head_size]
     query, _, _ = qkv.unbind(dim=2)
 
-    x = 16 // torch.tensor([], dtype=dtype).element_size()
-    key_block_shape = (num_heads, head_size // x, block_size, x)
+    output = torch.empty(
+        num_sequences,
+        medusa_candidates,
+        num_heads,
+        head_size,
+        dtype=dtype,
+        device="cuda",
+    )
+
+    input_output_args = PagedFlashAttentionInputOutputArgs(
+        output=output,
+        query=query,
+    )
+
+    # Cache Args
+    X = 16 // torch.tensor([], dtype=query.dtype).element_size()
+
+    key_block_shape = (
+        num_heads,
+        head_size // X,
+        block_size,
+        X,
+    )
+
     key_cache = torch.empty(
-        size=(num_blocks, *key_block_shape), dtype=dtype, device="cuda"
+        size=(num_blocks, *key_block_shape),
+        dtype=dtype,
+        device="cuda",
     )
     key_cache.uniform_(-1e-3, 1e-3)
+
     value_block_shape = (num_heads, head_size, block_size)
     value_cache = torch.empty(
         size=(num_blocks, *value_block_shape), dtype=dtype, device="cuda"
@@ -1196,6 +1268,25 @@ def test_trace_kernel(
     max_context_len = max(context_lens)
     context_lens = torch.tensor(context_lens, dtype=torch.int, device="cuda")
 
+    cache_args = PagedFlashAttentionCacheArgs(
+        key_cache=key_cache,
+        value_cache=value_cache,
+        head_mapping=head_mapping,
+        block_tables=block_tables,
+        context_lens=context_lens,
+    )
+
+    # Medusa Args
+    scale = float(1.0 / (head_size**0.5))
+    num_candidates, num_heads, head_dim = query.shape
+
+    medusa_args = PagedFlashAttentionMedusaArgs(
+        medusa_attn_mask=medusa_attn_mask,
+        scale=scale,
+        num_candidates=num_candidates,
+    )
+
+    # Stride Args
     # taking medusa candidates into account
     max_num_blocks_per_seq = (max_context_len + block_size - 1) // block_size
     block_tables = []
@@ -1207,87 +1298,52 @@ def test_trace_kernel(
     block_tables = torch.tensor(block_tables, dtype=torch.int, device="cuda")
     head_mapping = torch.arange(num_heads, dtype=torch.int32, device="cuda")
 
-    scale = float(1.0 / (head_size**0.5))
-
     num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
     assert num_heads % num_kv_heads == 0
+
     num_queries_per_kv = num_heads // num_kv_heads
+
     head_mapping = torch.repeat_interleave(
         torch.arange(num_kv_heads, dtype=torch.int32, device="cuda"), num_queries_per_kv
     )
 
-    output = torch.empty(
-        num_sequences,
-        medusa_candidates,
-        num_heads,
-        head_size,
-        dtype=dtype,
-        device="cuda",
+    stride_args = PagedFlashAttentionStrideArgs(
+        stride_ob=output.stride(0),
+        stride_os=output.stride(0),
+        stride_oh=output.stride(1),
+        stride_od=output.stride(2),
+        stride_qb=query.stride(0),
+        stride_qs=query.stride(0),
+        stride_qh=query.stride(1),
+        stride_qd=query.stride(2),
+        stride_kb=key_cache.stride(0),
+        stride_kh=key_cache.stride(1),
+        stride_kxd=key_cache.stride(2),
+        stride_kbs=key_cache.stride(3),
+        stride_kx=key_cache.stride(4),
+        stride_vb=value_cache.stride(0),
+        stride_vh=value_cache.stride(1),
+        stride_vd=value_cache.stride(2),
+        stride_vbs=value_cache.stride(3),
+        stride_bts=block_tables.stride(0),
+        stride_btb=block_tables.stride(1),
+        stride_mm_row=medusa_attn_mask.stride(2),
+        stride_mm_col=medusa_attn_mask.stride(3),
     )
+
+    # Index Args
     key_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
     key_head_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
     value_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
-    BLOCK_M = 16
-    BLOCK_N = 128
+    index_args = PagedFlashAttentionIndexArgs(
+        key_block_idx=key_block_idx,
+        key_head_idx=key_head_idx,
+        value_block_idx=value_block_idx,
+    )
+
+    # Constants
     assert BLOCK_N % block_size == 0
-
-    # FIXME(sunpeng17): avoid hardcode
-    X = 16 // torch.tensor([], dtype=query.dtype).element_size()
-
-    # batch, num_candidates, num_heads, head_dim = query.shape
-    num_candidates, num_heads, head_dim = query.shape
-    batch = 1
-    head_dim = query.shape[-1]
-
-    grid = (batch, num_heads, triton.cdiv(num_candidates, BLOCK_M))
-    num_warps = 4 if head_dim <= 64 else 8
-    cached_bin = jit_fn[grid](
-        output,
-        query,
-        key_cache,
-        value_cache,
-        head_mapping,
-        block_tables,
-        context_lens,
-        medusa_attn_mask,
-        ################### DEBUG ONLY #########################
-        # q, k,
-        # qk,
-        # p,
-        # v,
-        # am,
-        # q.stride(0), q.stride(1), k.stride(0), k.stride(1),
-        # qk.stride(0), qk.stride(1),
-        # p.stride(0), p.stride(1),
-        # v.stride(0), v.stride(1),
-        # am.stride(0), am.stride(1),
-        ################### DEBUG ONLY #########################
-        scale,
-        num_candidates,
-        output.stride(0),
-        output.stride(0),
-        output.stride(1),
-        output.stride(2),
-        query.stride(0),
-        query.stride(0),
-        query.stride(1),
-        query.stride(2),
-        key_cache.stride(0),
-        key_cache.stride(1),
-        key_cache.stride(2),
-        key_cache.stride(3),
-        key_cache.stride(4),
-        value_cache.stride(0),
-        value_cache.stride(1),
-        value_cache.stride(2),
-        value_cache.stride(3),
-        block_tables.stride(0),
-        block_tables.stride(1),
-        medusa_attn_mask.stride(2),
-        medusa_attn_mask.stride(3),
-        key_block_idx,
-        key_head_idx,
-        value_block_idx,
+    constant_args = PagedFlashAttentionConstants(
         BLOCK_M=BLOCK_M,
         BLOCK_DMODEL=head_dim,
         BLOCK_N=BLOCK_N,
@@ -1295,20 +1351,73 @@ def test_trace_kernel(
         PAGES_PER_BLOCK_N=BLOCK_N // block_size,  # asserted divisible
         BLOCK_DKEYCACHE=head_dim // X,  # asserted divisible
         X=X,
-        num_warps=num_warps,
-        num_stages=1,
     )
 
-    trace_config = TraceConfig(
-        trace_dir=trace_dir,
+    return PagedFlashAttentionArgs(
+        input_output_args=input_output_args,
+        cache_args=cache_args,
+        medusa_args=medusa_args,
+        stride_args=stride_args,
+        index_args=index_args,
+        constants=constant_args,
     )
-    jit_fn = JITFunction(kernel_path)
-    kernel_name = jit_fn.__name__
-    results = jit_fn
+
+
+@pytest.mark.parametrize("query_config", SINGLE_QUERY_CONFIG)
+@pytest.mark.parametrize("MAX_SEQ_LEN", [2048])
+def test_paged_attention(query_config, MAX_SEQ_LEN) -> List[AOTCompilationResult]:
+    kernel_path = "/notebooks/torch-extensions/extension_builder/triton-aot/python/test/unit/tools/fixtures/kernels/triton-paged-attention/paged_attention.py"
+    trace_dir = Path(__file__).parent / kernel_path.name.split(".")[0]
+
+    if trace_dir.exists():
+        shutil.rmtree(trace_dir)
+    trace_dir.mkdir(parents=True, exist_ok=True)
+
+    (
+        num_sequences,
+        num_heads,
+        head_size,
+        block_size,
+        num_blocks,
+        dtype,
+        num_kv_heads,
+        medusa_choices,
+    ) = query_config
+
+    TEST_SEED = 0
+    torch.manual_seed(TEST_SEED)
+    random.seed(TEST_SEED)
+
+    args = construct_paged_fa_args(
+        num_sequences,
+        num_heads,
+        head_size,
+        block_size,
+        num_blocks,
+        dtype,
+        num_kv_heads,
+        medusa_choices,
+        MAX_SEQ_LEN,
+    )
+
+    num_candidates, num_heads, head_dim = args.query.shape
+    batch = 1
+    head_dim = args.query.shape[-1]
+
+    grid = (batch, num_heads, triton.cdiv(num_candidates, args.BLOCK_M))
+    num_warps = 4 if head_dim <= 64 else 8
+
+    # trace_config = TraceConfig(
+    #     trace_dir=trace_dir,
+    # )
+    # jit_fn = JITFunction(kernel_path)
+    # kernel_name = jit_fn.__name__
+    # results = jit_fn
     # compiler = AOTCompiler(
     #     kernel_name=kernel_name,
     #     jit_args=args,
     #     jit_fn=jit_fn,
     #     save_dir=codegen_dir,
     # )
+    # compiled_result: AOTCompilationResult = compiler.generate()
     # compiled_result: AOTCompilationResult = compiler.generate()

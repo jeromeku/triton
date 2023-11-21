@@ -280,214 +280,214 @@ def paged_attention(
     return
 
 
-# key_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
-# key_head_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
-# value_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
+key_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
+key_head_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
+value_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
 
-# cached_bin = None
+cached_bin = None
 
 
-# @torch.no_grad()
-# def paged_flash_attention_fwd(
-#     output: torch.Tensor,  # [num_seqs, num_candidates, num_heads, head_dim]
-#     query: torch.Tensor,  # [num_seqs, num_candidates, num_heads, head_dim]
-#     key_cache: torch.Tensor,  # [num_blocks, num_heads, head_size // x, block_size, x]
-#     value_cache: torch.Tensor,  # [num_blocks, num_heads, head_size, block_size]
-#     head_mapping: torch.Tensor,  # [num_heads]
-#     scale: float,
-#     block_tables: torch.Tensor,  # [num_seqs, max_num_blocks_per_seq]
-#     context_lens: torch.Tensor,  # [num_seqs]
-#     block_size: int,
-#     max_context_len: int,
-#     alibi_slops: Optional[torch.Tensor],
-#     medusa_attn_mask: Optional[torch.Tensor],  # [num_candidates, num_candidates]
-# ):
-#     global key_block_idx, key_head_idx, value_block_idx
-#     # does not support alibi for now
-#     assert alibi_slops is None
+@torch.no_grad()
+def paged_flash_attention_fwd(
+    output: torch.Tensor,  # [num_seqs, num_candidates, num_heads, head_dim]
+    query: torch.Tensor,  # [num_seqs, num_candidates, num_heads, head_dim]
+    key_cache: torch.Tensor,  # [num_blocks, num_heads, head_size // x, block_size, x]
+    value_cache: torch.Tensor,  # [num_blocks, num_heads, head_size, block_size]
+    head_mapping: torch.Tensor,  # [num_heads]
+    scale: float,
+    block_tables: torch.Tensor,  # [num_seqs, max_num_blocks_per_seq]
+    context_lens: torch.Tensor,  # [num_seqs]
+    block_size: int,
+    max_context_len: int,
+    alibi_slops: Optional[torch.Tensor],
+    medusa_attn_mask: Optional[torch.Tensor],  # [num_candidates, num_candidates]
+):
+    global key_block_idx, key_head_idx, value_block_idx
+    # does not support alibi for now
+    assert alibi_slops is None
 
-#     global cached_bin
+    global cached_bin
 
-#     # query = query.expand(1, -1, -1, -1)
-#     # output = output.expand(1, -1, -1, -1)
-#     # medusa_attn_mask = medusa_attn_mask[0][0]
+    # query = query.expand(1, -1, -1, -1)
+    # output = output.expand(1, -1, -1, -1)
+    # medusa_attn_mask = medusa_attn_mask[0][0]
 
-#     BLOCK_M = 16
-#     BLOCK_N = 128
-#     assert BLOCK_N % block_size == 0
+    BLOCK_M = 16
+    BLOCK_N = 128
+    assert BLOCK_N % block_size == 0
 
-#     # FIXME(sunpeng17): avoid hardcode
-#     X = 16 // torch.tensor([], dtype=query.dtype).element_size()
+    # FIXME(sunpeng17): avoid hardcode
+    X = 16 // torch.tensor([], dtype=query.dtype).element_size()
 
-#     # batch, num_candidates, num_heads, head_dim = query.shape
-#     num_candidates, num_heads, head_dim = query.shape
-#     batch = 1
-#     head_dim = query.shape[-1]
+    # batch, num_candidates, num_heads, head_dim = query.shape
+    num_candidates, num_heads, head_dim = query.shape
+    batch = 1
+    head_dim = query.shape[-1]
 
-#     ################### DEBUG ONLY #########################
-#     # q = torch.zeros([BLOCK_M, head_dim], dtype=query.dtype, device=query.device)
-#     # k = torch.zeros([head_dim, BLOCK_N], dtype=query.dtype, device=query.device)
-#     # qk = torch.zeros([BLOCK_M, BLOCK_N], dtype=query.dtype, device=query.device)
-#     # p = torch.zeros([BLOCK_M, BLOCK_N], dtype=query.dtype, device=query.device)
-#     # v = torch.zeros([BLOCK_N, head_dim], dtype=query.dtype, device=query.device)
-#     # am = torch.zeros([BLOCK_M, BLOCK_N], dtype=query.dtype, device=query.device)
-#     ################### DEBUG ONLY #########################
+    ################### DEBUG ONLY #########################
+    # q = torch.zeros([BLOCK_M, head_dim], dtype=query.dtype, device=query.device)
+    # k = torch.zeros([head_dim, BLOCK_N], dtype=query.dtype, device=query.device)
+    # qk = torch.zeros([BLOCK_M, BLOCK_N], dtype=query.dtype, device=query.device)
+    # p = torch.zeros([BLOCK_M, BLOCK_N], dtype=query.dtype, device=query.device)
+    # v = torch.zeros([BLOCK_N, head_dim], dtype=query.dtype, device=query.device)
+    # am = torch.zeros([BLOCK_M, BLOCK_N], dtype=query.dtype, device=query.device)
+    ################### DEBUG ONLY #########################
 
-#     assert num_candidates <= BLOCK_M  # some code in the kernel assumes only 1 BLOCK_M
-#     assert head_dim % X == 0
+    assert num_candidates <= BLOCK_M  # some code in the kernel assumes only 1 BLOCK_M
+    assert head_dim % X == 0
 
-#     # batch, head, q block
-#     # normally we don't need to partition q because num_candidates are typically small
-#     # but we keep the code here for future extension
-#     #
-#     # a block in the grid processes a BLOCK_M sequences
-#     #
-#     # TODO(sunpeng17): possible future parallel alone K and V blocks?
-#     grid = (batch, num_heads, triton.cdiv(num_candidates, BLOCK_M))
+    # batch, head, q block
+    # normally we don't need to partition q because num_candidates are typically small
+    # but we keep the code here for future extension
+    #
+    # a block in the grid processes a BLOCK_M sequences
+    #
+    # TODO(sunpeng17): possible future parallel alone K and V blocks?
+    grid = (batch, num_heads, triton.cdiv(num_candidates, BLOCK_M))
 
-#     if cached_bin is not None:
-#         bin = cached_bin
-#         stream = torch.cuda.current_stream().cuda_stream
-#         args = [
-#             output,
-#             query,
-#             key_cache,
-#             value_cache,
-#             head_mapping,
-#             block_tables,
-#             context_lens,
-#             medusa_attn_mask,
-#             scale,
-#             num_candidates,
-#             output.stride(0),
-#             output.stride(0),
-#             output.stride(1),
-#             output.stride(2),
-#             query.stride(0),
-#             query.stride(0),
-#             query.stride(1),
-#             query.stride(2),
-#             key_cache.stride(0),
-#             key_cache.stride(1),
-#             key_cache.stride(2),
-#             key_cache.stride(3),
-#             key_cache.stride(4),
-#             value_cache.stride(0),
-#             value_cache.stride(1),
-#             value_cache.stride(2),
-#             value_cache.stride(3),
-#             block_tables.stride(0),
-#             block_tables.stride(1),
-#             medusa_attn_mask.stride(2),
-#             medusa_attn_mask.stride(3),
-#             key_block_idx,
-#             key_head_idx,
-#             value_block_idx,
-#         ]
-#         bin.c_wrapper(
-#             grid[0],
-#             grid[1],
-#             grid[2],
-#             bin.num_warps,
-#             bin.num_ctas,
-#             bin.clusterDims[0],
-#             bin.clusterDims[1],
-#             bin.clusterDims[2],
-#             bin.shared,
-#             stream,
-#             bin.cu_function,
-#             CompiledKernel.launch_enter_hook,
-#             CompiledKernel.launch_exit_hook,
-#             bin,
-#             *args
-#         )
-#         return
+    if cached_bin is not None:
+        bin = cached_bin
+        stream = torch.cuda.current_stream().cuda_stream
+        args = [
+            output,
+            query,
+            key_cache,
+            value_cache,
+            head_mapping,
+            block_tables,
+            context_lens,
+            medusa_attn_mask,
+            scale,
+            num_candidates,
+            output.stride(0),
+            output.stride(0),
+            output.stride(1),
+            output.stride(2),
+            query.stride(0),
+            query.stride(0),
+            query.stride(1),
+            query.stride(2),
+            key_cache.stride(0),
+            key_cache.stride(1),
+            key_cache.stride(2),
+            key_cache.stride(3),
+            key_cache.stride(4),
+            value_cache.stride(0),
+            value_cache.stride(1),
+            value_cache.stride(2),
+            value_cache.stride(3),
+            block_tables.stride(0),
+            block_tables.stride(1),
+            medusa_attn_mask.stride(2),
+            medusa_attn_mask.stride(3),
+            key_block_idx,
+            key_head_idx,
+            value_block_idx,
+        ]
+        bin.c_wrapper(
+            grid[0],
+            grid[1],
+            grid[2],
+            bin.num_warps,
+            bin.num_ctas,
+            bin.clusterDims[0],
+            bin.clusterDims[1],
+            bin.clusterDims[2],
+            bin.shared,
+            stream,
+            bin.cu_function,
+            CompiledKernel.launch_enter_hook,
+            CompiledKernel.launch_exit_hook,
+            bin,
+            *args
+        )
+        return
 
-#     # print(f'*{output.dtype}, *{query.dtype}, *{key_cache.dtype}, *{value_cache.dtype}, '
-#     #       f'*{head_mapping.dtype}, *{block_tables.dtype}, *{context_lens.dtype}, *{medusa_attn_mask.dtype}, '
-#     #       f'{str(type(scale))}, {str(type(num_candidates))}, {",".join([str(type(output.stride(0)))] * 4)}, '
-#     #       f'{",".join([str(type(query.stride(0)))] * 4)}, '
-#     #       f'{",".join([str(type(key_cache.stride(0)))] * 5)}, '
-#     #       f'{",".join([str(type(value_cache.stride(0)))] * 4)}, '
-#     #       f'{",".join([str(type(block_tables.stride(0)))] * 2)}, '
-#     #       f'{",".join([str(type(medusa_attn_mask.stride(0)))] * 2)}, '
-#     #       f'*{key_block_idx.dtype}, *{key_head_idx.dtype}, *{value_block_idx.dtype}, '
-#     #       f'{BLOCK_M}, {head_dim}, {BLOCK_N}, {block_size}, {BLOCK_N // block_size}, {head_dim // X}, {X}'
-#     #       )
+    # print(f'*{output.dtype}, *{query.dtype}, *{key_cache.dtype}, *{value_cache.dtype}, '
+    #       f'*{head_mapping.dtype}, *{block_tables.dtype}, *{context_lens.dtype}, *{medusa_attn_mask.dtype}, '
+    #       f'{str(type(scale))}, {str(type(num_candidates))}, {",".join([str(type(output.stride(0)))] * 4)}, '
+    #       f'{",".join([str(type(query.stride(0)))] * 4)}, '
+    #       f'{",".join([str(type(key_cache.stride(0)))] * 5)}, '
+    #       f'{",".join([str(type(value_cache.stride(0)))] * 4)}, '
+    #       f'{",".join([str(type(block_tables.stride(0)))] * 2)}, '
+    #       f'{",".join([str(type(medusa_attn_mask.stride(0)))] * 2)}, '
+    #       f'*{key_block_idx.dtype}, *{key_head_idx.dtype}, *{value_block_idx.dtype}, '
+    #       f'{BLOCK_M}, {head_dim}, {BLOCK_N}, {block_size}, {BLOCK_N // block_size}, {head_dim // X}, {X}'
+    #       )
 
-#     num_warps = 4 if head_dim <= 64 else 8
-#     cached_bin = _fwd_kernel[grid](
-#         output,
-#         query,
-#         key_cache,
-#         value_cache,
-#         head_mapping,
-#         block_tables,
-#         context_lens,
-#         medusa_attn_mask,
-#         ################### DEBUG ONLY #########################
-#         # q, k,
-#         # qk,
-#         # p,
-#         # v,
-#         # am,
-#         # q.stride(0), q.stride(1), k.stride(0), k.stride(1),
-#         # qk.stride(0), qk.stride(1),
-#         # p.stride(0), p.stride(1),
-#         # v.stride(0), v.stride(1),
-#         # am.stride(0), am.stride(1),
-#         ################### DEBUG ONLY #########################
-#         scale,
-#         num_candidates,
-#         output.stride(0),
-#         output.stride(0),
-#         output.stride(1),
-#         output.stride(2),
-#         query.stride(0),
-#         query.stride(0),
-#         query.stride(1),
-#         query.stride(2),
-#         key_cache.stride(0),
-#         key_cache.stride(1),
-#         key_cache.stride(2),
-#         key_cache.stride(3),
-#         key_cache.stride(4),
-#         value_cache.stride(0),
-#         value_cache.stride(1),
-#         value_cache.stride(2),
-#         value_cache.stride(3),
-#         block_tables.stride(0),
-#         block_tables.stride(1),
-#         medusa_attn_mask.stride(2),
-#         medusa_attn_mask.stride(3),
-#         key_block_idx,
-#         key_head_idx,
-#         value_block_idx,
-#         BLOCK_M=BLOCK_M,
-#         BLOCK_DMODEL=head_dim,
-#         BLOCK_N=BLOCK_N,
-#         BLOCK_SIZE=block_size,
-#         PAGES_PER_BLOCK_N=BLOCK_N // block_size,  # asserted divisible
-#         BLOCK_DKEYCACHE=head_dim // X,  # asserted divisible
-#         X=X,
-#         num_warps=num_warps,
-#         num_stages=1,
-#     )
+    num_warps = 4 if head_dim <= 64 else 8
+    cached_bin = paged_attention[grid](
+        output,
+        query,
+        key_cache,
+        value_cache,
+        head_mapping,
+        block_tables,
+        context_lens,
+        medusa_attn_mask,
+        ################### DEBUG ONLY #########################
+        # q, k,
+        # qk,
+        # p,
+        # v,
+        # am,
+        # q.stride(0), q.stride(1), k.stride(0), k.stride(1),
+        # qk.stride(0), qk.stride(1),
+        # p.stride(0), p.stride(1),
+        # v.stride(0), v.stride(1),
+        # am.stride(0), am.stride(1),
+        ################### DEBUG ONLY #########################
+        scale,
+        num_candidates,
+        output.stride(0),
+        output.stride(0),
+        output.stride(1),
+        output.stride(2),
+        query.stride(0),
+        query.stride(0),
+        query.stride(1),
+        query.stride(2),
+        key_cache.stride(0),
+        key_cache.stride(1),
+        key_cache.stride(2),
+        key_cache.stride(3),
+        key_cache.stride(4),
+        value_cache.stride(0),
+        value_cache.stride(1),
+        value_cache.stride(2),
+        value_cache.stride(3),
+        block_tables.stride(0),
+        block_tables.stride(1),
+        medusa_attn_mask.stride(2),
+        medusa_attn_mask.stride(3),
+        key_block_idx,
+        key_head_idx,
+        value_block_idx,
+        BLOCK_M=BLOCK_M,
+        BLOCK_DMODEL=head_dim,
+        BLOCK_N=BLOCK_N,
+        BLOCK_SIZE=block_size,
+        PAGES_PER_BLOCK_N=BLOCK_N // block_size,  # asserted divisible
+        BLOCK_DKEYCACHE=head_dim // X,  # asserted divisible
+        X=X,
+        num_warps=num_warps,
+        num_stages=1,
+    )
 
-#     ################### DEBUG ONLY #########################
-#     # torch.set_printoptions(profile="full")
-#     # torch.set_printoptions(precision=10)
-#     # print(f'after attn : q: {q}, shape: {q.shape}')
-#     # print(f'after attn : k: {k}, shape: {k.shape}')
-#     # print(f'after attn : qk: {qk}, shape: {qk.shape}')
-#     # print(f'after attn : p: {p}, shape: {p.shape}')
-#     # print(f'after attn : v: {v}, shape: {v.shape}')
-#     # print(f'after attn : medusa mask : {medusa_attn_mask}, shape: {medusa_attn_mask.shape}')
-#     # print(f'after attn : attn mask : {am}, shape: {am.shape}')
-#     # torch.set_printoptions(profile="default") # reset
-#     ################### DEBUG ONLY #########################
+    ################### DEBUG ONLY #########################
+    # torch.set_printoptions(profile="full")
+    # torch.set_printoptions(precision=10)
+    # print(f'after attn : q: {q}, shape: {q.shape}')
+    # print(f'after attn : k: {k}, shape: {k.shape}')
+    # print(f'after attn : qk: {qk}, shape: {qk.shape}')
+    # print(f'after attn : p: {p}, shape: {p.shape}')
+    # print(f'after attn : v: {v}, shape: {v.shape}')
+    # print(f'after attn : medusa mask : {medusa_attn_mask}, shape: {medusa_attn_mask.shape}')
+    # print(f'after attn : attn mask : {am}, shape: {am.shape}')
+    # torch.set_printoptions(profile="default") # reset
+    ################### DEBUG ONLY #########################
 
-#     # with nvtx.annotate("final output change", color="yellow"):
-#     #     output = output.squeeze(0)
+    # with nvtx.annotate("final output change", color="yellow"):
+    #     output = output.squeeze(0)
 
-#     return
+    return
