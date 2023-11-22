@@ -12,6 +12,7 @@ import torch
 
 import triton
 import triton.language as tl
+from triton.runtime.jit import JITFunction
 
 
 def generate_medusa_attn_mask(medusa_choices, device="cuda"):
@@ -173,7 +174,7 @@ def construct_cache_args(
     num_sequences,
     num_blocks,
     dtype,
-    MAX_SEQ_LEN
+    MAX_SEQ_LEN,
 ):
     X = x_dim // torch.tensor([], dtype=dtype).element_size()
 
@@ -236,112 +237,25 @@ def construct_cache_args(
     return cache_args
 
 
-def construct_index_args():
-    pass
+def construct_index_args(key_block_dim, key_head_dim, value_block_dim):
+    key_block_idx = torch.zeros([key_block_dim], dtype=torch.int64, device="cuda")
+    key_head_idx = torch.zeros([key_head_dim], dtype=torch.int64, device="cuda")
+    value_block_idx = torch.zeros([value_block_dim], dtype=torch.int64, device="cuda")
+    index_args = PagedFlashAttentionIndexArgs(
+        key_block_idx=key_block_idx,
+        key_head_idx=key_head_idx,
+        value_block_idx=value_block_idx,
+    )
+    return index_args
 
 
 def construct_constant_args():
     pass
 
 
-def construct_stride_args():
-    pass
-
-
-def construct_paged_fa_args(
-    num_sequences,
-    num_heads,
-    head_size,
-    block_size,
-    num_blocks,
-    dtype,
-    num_kv_heads,
-    medusa_choices,
-    MAX_SEQ_LEN,
-    BLOCK_M=16,
-    BLOCK_N=128,
+def construct_stride_args(
+    output, query, key_cache, value_cache, block_tables, medusa_attn_mask
 ):
-    medusa_candidates = sum(itertools.accumulate(medusa_choices, operator.mul))
-    medusa_attn_mask = generate_medusa_attn_mask(medusa_choices, device="cuda")
-
-    # Input / Output Args
-    qkv = torch.empty(
-        num_sequences,
-        medusa_candidates,
-        3,
-        num_heads,
-        head_size,
-        dtype=dtype,
-        device="cuda",
-    )
-    qkv.uniform_(-1e-3, 1e-3)
-
-    # query shape: [num_sequences, medusa_candidates, num_heads, head_size]
-    query, _, _ = qkv.unbind(dim=2)
-
-    output = torch.empty(
-        num_sequences,
-        medusa_candidates,
-        num_heads,
-        head_size,
-        dtype=dtype,
-        device="cuda",
-    )
-
-    input_output_args = PagedFlashAttentionInputOutputArgs(
-        output=output,
-        query=query,
-    )
-
-    # Cache Args
-    # num_candidates, num_heads, head_dim = query.shape
-
-    # Medusa Args
-
-    medusa_args = construct_medusa_args(
-        head_size=head_size,
-        medusa_attn_mask=medusa_attn_mask,
-        num_candidates=medusa_candidates,
-    )
-
-    # Stride Args
-    # taking medusa candidates into account
-    # max_num_blocks_per_seq = (max_context_len + block_size - 1) // block_size
-    # block_tables = []
-    # for _ in range(num_sequences):
-    #     block_table = [
-    #         random.randint(0, num_blocks - 1) for _ in range(max_num_blocks_per_seq)
-    #     ]
-    #     block_tables.append(block_table)
-    # block_tables = torch.tensor(block_tables, dtype=torch.int, device="cuda")
-    # head_mapping = torch.arange(num_heads, dtype=torch.int32, device="cuda")
-
-    # num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
-    # assert num_heads % num_kv_heads == 0
-
-    # num_queries_per_kv = num_heads // num_kv_heads
-
-    # head_mapping = torch.repeat_interleave(
-    #     torch.arange(num_kv_heads, dtype=torch.int32, device="cuda"), num_queries_per_kv
-    # )
-
-    cache_args = construct_cache_args(
-        x_dim=16,
-        num_heads=num_heads,
-        head_size=head_size,
-        block_size=block_size,
-        num_candidates=medusa_candidates,
-        num_sequences=num_sequences,
-        num_blocks=num_blocks,
-        dtype=dtype,
-        MAX_SEQ_LEN=MAX_SEQ_LEN,
-    )
-
-    key_cache = cache_args.key_cache
-    value_cache = cache_args.value_cache
-    block_tables = cache_args.block_tables
-    X = cache_args.X
-
     stride_args = PagedFlashAttentionStrideArgs(
         stride_ob=output.stride(0),
         stride_os=output.stride(0),
@@ -366,15 +280,104 @@ def construct_paged_fa_args(
         stride_mm_col=medusa_attn_mask.stride(3),
     )
 
-    # Index Args
-    key_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
-    key_head_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
-    value_block_idx = torch.zeros([128], dtype=torch.int64, device="cuda")
-    index_args = PagedFlashAttentionIndexArgs(
-        key_block_idx=key_block_idx,
-        key_head_idx=key_head_idx,
-        value_block_idx=value_block_idx,
+    return stride_args
+
+
+def construct_input_output_args(
+    num_sequences, num_candidates, num_heads, head_size, dtype
+):
+    qkv = torch.empty(
+        num_sequences,
+        num_candidates,
+        3,
+        num_heads,
+        head_size,
+        dtype=dtype,
+        device="cuda",
     )
+    qkv.uniform_(-1e-3, 1e-3)
+
+    # query shape: [num_sequences, medusa_candidates, num_heads, head_size]
+    query, _, _ = qkv.unbind(dim=2)
+
+    output = torch.empty(
+        num_sequences,
+        num_candidates,
+        num_heads,
+        head_size,
+        dtype=dtype,
+        device="cuda",
+    )
+
+    input_output_args = PagedFlashAttentionInputOutputArgs(
+        output=output,
+        query=query,
+    )
+
+    return input_output_args
+
+
+def construct_paged_fa_args(
+    *,
+    num_sequences,
+    num_heads,
+    head_size,
+    block_size,
+    num_blocks,
+    dtype,
+    num_kv_heads,
+    medusa_choices,
+    MAX_SEQ_LEN,
+    BLOCK_M=16,
+    BLOCK_N=128,
+):
+    medusa_candidates = sum(itertools.accumulate(medusa_choices, operator.mul))
+    medusa_attn_mask = generate_medusa_attn_mask(medusa_choices, device="cuda")
+
+    input_output_args = construct_input_output_args(
+        num_sequences, medusa_candidates, num_heads, head_size, dtype
+    )
+
+    # Cache Args
+    # num_candidates, num_heads, head_dim = query.shape
+
+    # Medusa Args
+
+    query = input_output_args.query
+    output = input_output_args.output
+
+    medusa_args = construct_medusa_args(
+        head_size=head_size,
+        medusa_attn_mask=medusa_attn_mask,
+        num_candidates=medusa_candidates,
+    )
+    cache_args = construct_cache_args(
+        x_dim=16,
+        num_heads=num_heads,
+        head_size=head_size,
+        block_size=block_size,
+        num_candidates=medusa_candidates,
+        num_sequences=num_sequences,
+        num_blocks=num_blocks,
+        dtype=dtype,
+        MAX_SEQ_LEN=MAX_SEQ_LEN,
+    )
+
+    key_cache = cache_args.key_cache
+    value_cache = cache_args.value_cache
+    block_tables = cache_args.block_tables
+    X = cache_args.X
+
+    stride_args = construct_stride_args(
+        output=output,
+        query=query,
+        key_cache=key_cache,
+        value_cache=value_cache,
+        block_tables=block_tables,
+        medusa_attn_mask=medusa_attn_mask,
+    )
+    # Index Args
+    index_args = construct_index_args(128, 128, 128)
 
     # Constants
     assert BLOCK_N % block_size == 0
@@ -406,8 +409,17 @@ class SingleQueryArgs(DataClassDict):
     block_size: int
     num_blocks: int
     dtype: torch.dtype
+    BLOCK_M: int
+    BLOCK_N: int
+    MAX_SEQ_LEN: int
     num_kv_heads: int = None
     medusa_choices: List[int] = None
+
+
+@dataclass(kw_only=True)
+class LaunchArgs(DataClassDict):
+    num_warps: int
+    num_stages: int
 
 
 SINGLE_QUERY_CONFIG = [
@@ -420,13 +432,15 @@ SINGLE_QUERY_CONFIG = [
         dtype=torch.float16,
         num_kv_heads=None,
         medusa_choices=[1, 3, 4],
+        BLOCK_M=16,
+        BLOCK_N=128,
+        MAX_SEQ_LEN=2048,
     )
 ]
 
 
 @pytest.mark.parametrize("query_config", SINGLE_QUERY_CONFIG)
-@pytest.mark.parametrize("MAX_SEQ_LEN", [2048])
-def test_paged_attention(query_config, MAX_SEQ_LEN):
+def test_paged_attention(query_config):
     kernel_path = "/notebooks/torch-extensions/extension_builder/triton-aot/python/test/unit/tools/fixtures/kernels/triton-paged-attention/paged_attention.py"
     trace_dir = Path(__file__).parent / kernel_path.split(".")[0]
 
@@ -434,44 +448,34 @@ def test_paged_attention(query_config, MAX_SEQ_LEN):
         shutil.rmtree(trace_dir)
     trace_dir.mkdir(parents=True, exist_ok=True)
 
-    (
-        num_sequences,
-        num_heads,
-        head_size,
-        block_size,
-        num_blocks,
-        dtype,
-        num_kv_heads,
-        medusa_choices,
-    ) = query_config
-
     TEST_SEED = 0
     torch.manual_seed(TEST_SEED)
     random.seed(TEST_SEED)
 
     args = construct_paged_fa_args(
-        num_sequences,
-        num_heads,
-        head_size,
-        block_size,
-        num_blocks,
-        dtype,
-        num_kv_heads,
-        medusa_choices,
-        MAX_SEQ_LEN,
+        num_sequences=query_config.num_sequences,
+        num_heads=query_config.num_heads,
+        head_size=query_config.head_size,
+        block_size=query_config.block_size,
+        num_blocks=query_config.num_blocks,
+        dtype=query_config.dtype,
+        num_kv_heads=query_config.num_kv_heads,
+        medusa_choices=query_config.medusa_choices,
+        MAX_SEQ_LEN=query_config.MAX_SEQ_LEN,
+        BLOCK_M=query_config.BLOCK_M,
+        BLOCK_N=query_config.BLOCK_N,
     )
 
-    num_candidates, num_heads, head_dim = args.query.shape
-    batch = 1
-    head_dim = args.query.shape[-1]
+    num_sequences, num_candidates, num_heads, head_dim = args.query.shape
 
-    grid = (batch, num_heads, triton.cdiv(num_candidates, args.BLOCK_M))
+    grid = (num_sequences, num_heads, triton.cdiv(num_candidates, args.BLOCK_M))
     num_warps = 4 if head_dim <= 64 else 8
-
+    num_stages = 1
+    jit_fn = JITFunction(kernel_path)
+    # Cross-check kernel args with args
     # trace_config = TraceConfig(
     #     trace_dir=trace_dir,
     # )
-    # jit_fn = JITFunction(kernel_path)
     # kernel_name = jit_fn.__name__
     # results = jit_fn
     # compiler = AOTCompiler(
