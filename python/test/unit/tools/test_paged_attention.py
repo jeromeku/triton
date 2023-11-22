@@ -53,7 +53,7 @@ def generate_medusa_attn_mask(medusa_choices, device="cuda"):
 
 
 @dataclass
-class DataClassDict:
+class DataClassDict(dict):
     def __post_init__(self):
         self.update(self.__dict__)
 
@@ -104,6 +104,7 @@ class PagedFlashAttentionCacheArgs(DataClassDict):
     head_mapping: torch.Tensor  # [num_heads]
     block_tables: torch.Tensor  # [num_seqs, max_num_blocks_per_seq]
     context_lens: torch.Tensor  # [num_seqs]
+    X: tl.constexpr  # Need documentation
 
 
 @dataclass(kw_only=True)
@@ -153,19 +154,98 @@ class PagedFlashAttentionArgs(DataClassDict):
         # self.__dict__.pop("constants")
 
 
-@dataclass
-class SingleQueryArgs(DataClassDict):
-    num_sequences: int
-    num_heads: int
-    head_size: int
-    block_size: int
-    num_blocks: int
-    dtype: torch.dtype
-    num_kv_heads: int = None
-    medusa_choices: List[int] = None
+def construct_medusa_args(head_size, num_candidates, medusa_attn_mask):
+    scale = float(1.0 / (head_size**0.5))
+    return PagedFlashAttentionMedusaArgs(
+        medusa_attn_mask=medusa_attn_mask,
+        scale=scale,
+        num_candidates=num_candidates,
+    )
 
 
-SINGLE_QUERY_CONFIG = [SingleQueryArgs(7, 40, 16, 128, 10240, torch.float16, [1, 3, 4])]
+def construct_cache_args(
+    x_dim,
+    *,
+    num_heads,
+    head_size,
+    block_size,
+    num_candidates,
+    num_sequences,
+    num_blocks,
+    dtype,
+    MAX_SEQ_LEN
+):
+    X = x_dim // torch.tensor([], dtype=dtype).element_size()
+
+    key_block_shape = (
+        num_heads,
+        head_size // X,
+        block_size,
+        X,
+    )
+
+    key_cache = torch.empty(
+        size=(num_blocks, *key_block_shape),
+        dtype=dtype,
+        device="cuda",
+    )
+    key_cache.uniform_(-1e-3, 1e-3)
+
+    value_block_shape = (num_heads, head_size, block_size)
+    value_cache = torch.empty(
+        size=(num_blocks, *value_block_shape), dtype=dtype, device="cuda"
+    )
+    value_cache.uniform_(-1e-3, 1e-3)
+
+    context_lens = [
+        max(random.randint(1, MAX_SEQ_LEN), num_candidates + 10)
+        for _ in range(num_sequences)
+    ]
+    max_context_len = max(context_lens)
+    context_lens = torch.tensor(context_lens, dtype=torch.int, device="cuda")
+
+    # Stride Args
+    # taking medusa candidates into account
+    max_num_blocks_per_seq = (max_context_len + block_size - 1) // block_size
+    block_tables = []
+    for _ in range(num_sequences):
+        block_table = [
+            random.randint(0, num_blocks - 1) for _ in range(max_num_blocks_per_seq)
+        ]
+        block_tables.append(block_table)
+    block_tables = torch.tensor(block_tables, dtype=torch.int, device="cuda")
+    head_mapping = torch.arange(num_heads, dtype=torch.int32, device="cuda")
+
+    num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+    assert num_heads % num_kv_heads == 0
+
+    num_queries_per_kv = num_heads // num_kv_heads
+
+    head_mapping = torch.repeat_interleave(
+        torch.arange(num_kv_heads, dtype=torch.int32, device="cuda"), num_queries_per_kv
+    )
+
+    cache_args = PagedFlashAttentionCacheArgs(
+        key_cache=key_cache,
+        value_cache=value_cache,
+        head_mapping=head_mapping,
+        block_tables=block_tables,
+        context_lens=context_lens,
+        X=X,
+    )
+    return cache_args
+
+
+def construct_index_args():
+    pass
+
+
+def construct_constant_args():
+    pass
+
+
+def construct_stride_args():
+    pass
 
 
 def construct_paged_fa_args(
@@ -214,73 +294,53 @@ def construct_paged_fa_args(
     )
 
     # Cache Args
-    X = 16 // torch.tensor([], dtype=query.dtype).element_size()
-
-    key_block_shape = (
-        num_heads,
-        head_size // X,
-        block_size,
-        X,
-    )
-
-    key_cache = torch.empty(
-        size=(num_blocks, *key_block_shape),
-        dtype=dtype,
-        device="cuda",
-    )
-    key_cache.uniform_(-1e-3, 1e-3)
-
-    value_block_shape = (num_heads, head_size, block_size)
-    value_cache = torch.empty(
-        size=(num_blocks, *value_block_shape), dtype=dtype, device="cuda"
-    )
-    value_cache.uniform_(-1e-3, 1e-3)
-
-    context_lens = [
-        max(random.randint(1, MAX_SEQ_LEN), medusa_candidates + 10)
-        for _ in range(num_sequences)
-    ]
-    max_context_len = max(context_lens)
-    context_lens = torch.tensor(context_lens, dtype=torch.int, device="cuda")
-
-    cache_args = PagedFlashAttentionCacheArgs(
-        key_cache=key_cache,
-        value_cache=value_cache,
-        head_mapping=head_mapping,
-        block_tables=block_tables,
-        context_lens=context_lens,
-    )
+    # num_candidates, num_heads, head_dim = query.shape
 
     # Medusa Args
-    scale = float(1.0 / (head_size**0.5))
-    num_candidates, num_heads, head_dim = query.shape
 
-    medusa_args = PagedFlashAttentionMedusaArgs(
+    medusa_args = construct_medusa_args(
+        head_size=head_size,
         medusa_attn_mask=medusa_attn_mask,
-        scale=scale,
-        num_candidates=num_candidates,
+        num_candidates=medusa_candidates,
     )
 
     # Stride Args
     # taking medusa candidates into account
-    max_num_blocks_per_seq = (max_context_len + block_size - 1) // block_size
-    block_tables = []
-    for _ in range(num_sequences):
-        block_table = [
-            random.randint(0, num_blocks - 1) for _ in range(max_num_blocks_per_seq)
-        ]
-        block_tables.append(block_table)
-    block_tables = torch.tensor(block_tables, dtype=torch.int, device="cuda")
-    head_mapping = torch.arange(num_heads, dtype=torch.int32, device="cuda")
+    # max_num_blocks_per_seq = (max_context_len + block_size - 1) // block_size
+    # block_tables = []
+    # for _ in range(num_sequences):
+    #     block_table = [
+    #         random.randint(0, num_blocks - 1) for _ in range(max_num_blocks_per_seq)
+    #     ]
+    #     block_tables.append(block_table)
+    # block_tables = torch.tensor(block_tables, dtype=torch.int, device="cuda")
+    # head_mapping = torch.arange(num_heads, dtype=torch.int32, device="cuda")
 
-    num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
-    assert num_heads % num_kv_heads == 0
+    # num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+    # assert num_heads % num_kv_heads == 0
 
-    num_queries_per_kv = num_heads // num_kv_heads
+    # num_queries_per_kv = num_heads // num_kv_heads
 
-    head_mapping = torch.repeat_interleave(
-        torch.arange(num_kv_heads, dtype=torch.int32, device="cuda"), num_queries_per_kv
+    # head_mapping = torch.repeat_interleave(
+    #     torch.arange(num_kv_heads, dtype=torch.int32, device="cuda"), num_queries_per_kv
+    # )
+
+    cache_args = construct_cache_args(
+        x_dim=16,
+        num_heads=num_heads,
+        head_size=head_size,
+        block_size=block_size,
+        num_candidates=medusa_candidates,
+        num_sequences=num_sequences,
+        num_blocks=num_blocks,
+        dtype=dtype,
+        MAX_SEQ_LEN=MAX_SEQ_LEN,
     )
+
+    key_cache = cache_args.key_cache
+    value_cache = cache_args.value_cache
+    block_tables = cache_args.block_tables
+    X = cache_args.X
 
     stride_args = PagedFlashAttentionStrideArgs(
         stride_ob=output.stride(0),
@@ -320,11 +380,11 @@ def construct_paged_fa_args(
     assert BLOCK_N % block_size == 0
     constant_args = PagedFlashAttentionConstants(
         BLOCK_M=BLOCK_M,
-        BLOCK_DMODEL=head_dim,
+        BLOCK_DMODEL=head_size,
         BLOCK_N=BLOCK_N,
         BLOCK_SIZE=block_size,
         PAGES_PER_BLOCK_N=BLOCK_N // block_size,  # asserted divisible
-        BLOCK_DKEYCACHE=head_dim // X,  # asserted divisible
+        BLOCK_DKEYCACHE=head_size // X,  # asserted divisible
         X=X,
     )
 
@@ -338,11 +398,37 @@ def construct_paged_fa_args(
     )
 
 
+@dataclass(kw_only=True)
+class SingleQueryArgs(DataClassDict):
+    num_sequences: int
+    num_heads: int
+    head_size: int
+    block_size: int
+    num_blocks: int
+    dtype: torch.dtype
+    num_kv_heads: int = None
+    medusa_choices: List[int] = None
+
+
+SINGLE_QUERY_CONFIG = [
+    SingleQueryArgs(
+        num_sequences=7,
+        num_heads=40,
+        head_size=16,
+        block_size=128,
+        num_blocks=10240,
+        dtype=torch.float16,
+        num_kv_heads=None,
+        medusa_choices=[1, 3, 4],
+    )
+]
+
+
 @pytest.mark.parametrize("query_config", SINGLE_QUERY_CONFIG)
 @pytest.mark.parametrize("MAX_SEQ_LEN", [2048])
 def test_paged_attention(query_config, MAX_SEQ_LEN):
     kernel_path = "/notebooks/torch-extensions/extension_builder/triton-aot/python/test/unit/tools/fixtures/kernels/triton-paged-attention/paged_attention.py"
-    trace_dir = Path(__file__).parent / kernel_path.name.split(".")[0]
+    trace_dir = Path(__file__).parent / kernel_path.split(".")[0]
 
     if trace_dir.exists():
         shutil.rmtree(trace_dir)
@@ -394,5 +480,6 @@ def test_paged_attention(query_config, MAX_SEQ_LEN):
     #     jit_fn=jit_fn,
     #     save_dir=codegen_dir,
     # )
+    # compiled_result: AOTCompilationResult = compiler.generate()
     # compiled_result: AOTCompilationResult = compiler.generate()
     # compiled_result: AOTCompilationResult = compiler.generate()
