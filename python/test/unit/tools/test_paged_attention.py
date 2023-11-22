@@ -105,7 +105,7 @@ class PagedFlashAttentionCacheArgs(DataClassDict):
     head_mapping: torch.Tensor  # [num_heads]
     block_tables: torch.Tensor  # [num_seqs, max_num_blocks_per_seq]
     context_lens: torch.Tensor  # [num_seqs]
-    X: tl.constexpr  # Need documentation
+    # X: tl.constexpr  # Need documentation
 
 
 @dataclass(kw_only=True)
@@ -138,7 +138,7 @@ class PagedFlashAttentionArgs(DataClassDict):
     constants: PagedFlashAttentionConstants
 
     def __post_init__(self):
-        super().__post_init__(self)
+        # super().__post_init__(self)
 
         full_args = OrderedDict(
             **self.input_output_args,
@@ -150,9 +150,9 @@ class PagedFlashAttentionArgs(DataClassDict):
         )
         self.__dict__.update(full_args)
 
-        # self.__dict__.pop("cache_args")
-        # self.__dict__.pop("stride_args")
-        # self.__dict__.pop("constants")
+    # self.__dict__.pop("cache_args")
+    # self.__dict__.pop("stride_args")
+    # self.__dict__.pop("constants")
 
 
 def construct_medusa_args(head_size, num_candidates, medusa_attn_mask):
@@ -173,6 +173,7 @@ def construct_cache_args(
     num_candidates,
     num_sequences,
     num_blocks,
+    num_kv_heads,
     dtype,
     MAX_SEQ_LEN,
 ):
@@ -232,9 +233,9 @@ def construct_cache_args(
         head_mapping=head_mapping,
         block_tables=block_tables,
         context_lens=context_lens,
-        X=X,
+        # X=X,
     )
-    return cache_args
+    return cache_args, X
 
 
 def construct_index_args(key_block_dim, key_head_dim, value_block_dim):
@@ -276,8 +277,8 @@ def construct_stride_args(
         stride_vbs=value_cache.stride(3),
         stride_bts=block_tables.stride(0),
         stride_btb=block_tables.stride(1),
-        stride_mm_row=medusa_attn_mask.stride(2),
-        stride_mm_col=medusa_attn_mask.stride(3),
+        stride_mm_row=medusa_attn_mask.stride(0),
+        stride_mm_col=medusa_attn_mask.stride(1),
     )
 
     return stride_args
@@ -351,14 +352,15 @@ def construct_paged_fa_args(
         medusa_attn_mask=medusa_attn_mask,
         num_candidates=medusa_candidates,
     )
-    cache_args = construct_cache_args(
-        x_dim=16,
+    cache_args, X = construct_cache_args(
+        x_dim=16,  # Block size?
         num_heads=num_heads,
         head_size=head_size,
         block_size=block_size,
         num_candidates=medusa_candidates,
         num_sequences=num_sequences,
         num_blocks=num_blocks,
+        num_kv_heads=num_kv_heads,
         dtype=dtype,
         MAX_SEQ_LEN=MAX_SEQ_LEN,
     )
@@ -366,7 +368,6 @@ def construct_paged_fa_args(
     key_cache = cache_args.key_cache
     value_cache = cache_args.value_cache
     block_tables = cache_args.block_tables
-    X = cache_args.X
 
     stride_args = construct_stride_args(
         output=output,
@@ -426,8 +427,8 @@ SINGLE_QUERY_CONFIG = [
     SingleQueryArgs(
         num_sequences=7,
         num_heads=40,
-        head_size=16,
-        block_size=128,
+        head_size=128,
+        block_size=16,
         num_blocks=10240,
         dtype=torch.float16,
         num_kv_heads=None,
