@@ -502,6 +502,13 @@ class CMakeBuild(build_ext):
                 "-DCMAKE_CXX_FLAGS=-fsanitize=address",
             ]
 
+        if check_env_flag("TRITON_NO_WERROR"):
+            print("BUILD_DEBUG:::Adding WERROR FLAGS to build...")
+            cmake_args += [
+                "-DCMAKE_C_FLAGS=-Wno-error=deprecated-declarations",
+                "-DCMAKE_CXX_FLAGS=-Wno-error=deprecated-declarations"
+            ]
+        
         # environment variables we will pass through to cmake
         passthrough_args = [
             "TRITON_BUILD_PROTON",
