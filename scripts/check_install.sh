@@ -1,36 +1,47 @@
 export LLVM_BUILD=~/triton-debug/triton/llvm-project/build
 export PATH=$LLVM_BUILD/bin:$PATH
 export REPO_ROOT="$(git rev-parse --show-toplevel)"
-# echo " --------------------------------------------------------- "
-
-# echo "Checking llvm build..."
-# $LLVM_BUILD/bin/llvm-config --version
-# $LLVM_BUILD/bin/llvm-config --build-mode        # expect: RelWithDebInfo
-# $LLVM_BUILD/bin/llvm-config --assertion-mode    # expect: ON or YES
-
-echo " --------------------------------------------------------- "
-
-echo "Checking triton mlir opt..."
 export TRITON_BUILD=~/triton-debug/triton/build/cmake.linux-x86_64-cpython-3.12
 export PATH=$TRITON_BUILD/bin:$PATH
-printf 'builtin.module {}' | $TRITON_BUILD/bin/triton-opt -debug -pass-pipeline='builtin.module(canonicalize)' -
-printf 'builtin.module {}' | $LLVM_BUILD/bin/mlir-opt -debug -pass-pipeline='builtin.module(cse)' -
 
-echo " --------------------------------------------------------- "
+# # echo " --------------------------------------------------------- "
 
-echo "Checking triton build..."
+# # echo "Checking llvm build..."
+# # $LLVM_BUILD/bin/llvm-config --version
+# # $LLVM_BUILD/bin/llvm-config --build-mode        # expect: RelWithDebInfo
+# # $LLVM_BUILD/bin/llvm-config --assertion-mode    # expect: ON or YES
 
-readelf -S $TRITON_BUILD/bin/triton-opt | grep -i debug
-readelf -S $REPO_ROOT/python/triton/_C/libtriton.so | grep -i debug
+# echo " --------------------------------------------------------- "
 
-# or more detailed:
-$LLVM_BUILD/bin/llvm-dwarfdump $TRITON_BUILD/bin/triton-opt | head
+# echo "Checking triton mlir opt..."
+# printf 'builtin.module {}' | $TRITON_BUILD/bin/triton-opt -debug -pass-pipeline='builtin.module(canonicalize)' -
+# printf 'builtin.module {}' | $LLVM_BUILD/bin/mlir-opt -debug -pass-pipeline='builtin.module(cse)' -
 
-# grep -m1 '"command":' $TRITON_BUILD/compile_commands.json
-# # expect to see both -O2 and -g (RelWithDebInfo) in C++ commands
+# echo " --------------------------------------------------------- "
 
-echo " --------------------------------------------------------- "
+# echo "Checking triton build..."
 
-echo "Checking triton ldd..."
+# readelf -S $TRITON_BUILD/bin/triton-opt | grep -i debug
+# readelf -S $REPO_ROOT/python/triton/_C/libtriton.so | grep -i debug
 
-ldd $TRITON_BUILD/bin/triton-opt | egrep 'MLIR|LLVM|libclang|lld'
+# # or more detailed:
+# $LLVM_BUILD/bin/llvm-dwarfdump $TRITON_BUILD/bin/triton-opt | head
+
+# # grep -m1 '"command":' $TRITON_BUILD/compile_commands.json
+# # # expect to see both -O2 and -g (RelWithDebInfo) in C++ commands
+
+# echo " --------------------------------------------------------- "
+
+# echo "Checking triton ldd..."
+
+# ldd $TRITON_BUILD/bin/triton-opt | egrep 'MLIR|LLVM|libclang|lld'
+
+# pick a library with code: libTritonGPUTransforms, libTritonNVIDIAGPUToLLVM, etc.
+LIB=$TRITON_BUILD/lib/libTritonGPUTransforms.so
+
+# take a known symbol address at runtime (quick & dirty):
+nm -C $LIB | grep ' T ' | head -n1
+# copy the address (second column), e.g. 0000000000123456
+
+# addr2line -fe $LIB 0x0000000000123456
+# # expect: <function name> and a "path/to/file.cpp:line"
