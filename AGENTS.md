@@ -44,4 +44,5 @@ Examples:
 
 ## Logging
 - Please include verbatim logs of all our conversations as a markdown file in whatever project we're working on.
+- Include all the commands you ran during our conversations to provenance tracking.
 - If no specific project (e.g., code exploration), then please include it in a "codex-logs" folder at the repo root, with the timestamped filename.
