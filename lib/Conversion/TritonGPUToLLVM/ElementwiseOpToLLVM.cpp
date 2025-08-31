@@ -33,6 +33,22 @@ int getNumElementsPerThreads(Type type,
 } // namespace mlir::triton::gpu
 
 namespace {
+// Tutorial: lower tt.dummy_sync to a single PTX barrier via inline asm.
+struct DummySyncOpConversion : public ConvertOpToLLVMPattern<triton::DummySyncOp> {
+  using ConvertOpToLLVMPattern<triton::DummySyncOp>::ConvertOpToLLVMPattern;
+  LogicalResult matchAndRewrite(triton::DummySyncOp op, OpAdaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto voidTy = LLVM::LLVMVoidType::get(rewriter.getContext());
+    auto fnTy = LLVM::LLVMFunctionType::get(voidTy, /*isVarArg=*/false);
+    // Emit inline PTX: bar.sync 0;
+    rewriter.create<LLVM::InlineAsmOp>(op.getLoc(), TypeRange(), ValueRange(), fnTy,
+                                       StringRef("bar.sync 0;"), StringRef(""),
+                                       /*hasSideEffects=*/true, /*isAlignStack=*/false,
+                                       LLVM::AsmDialect::AD_ATT);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
 struct AddPtrOpConversion : public ConvertOpToLLVMPattern<AddPtrOp> {
   using ConvertOpToLLVMPattern<AddPtrOp>::ConvertOpToLLVMPattern;
 
@@ -734,4 +750,6 @@ void mlir::triton::populateElementwiseOpToLLVMPatterns(
   patterns.add<AbsFOpConversion>(typeConverter, axisInfoAnalysis, benefit);
   patterns.add<SelectOpConversion>(typeConverter, axisInfoAnalysis, benefit);
   patterns.add<MapElementwiseOpConversion>(typeConverter, benefit);
+  // Tutorial: register lowering for tt.dummy_sync.
+  patterns.add<DummySyncOpConversion>(typeConverter, benefit);
 }

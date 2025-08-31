@@ -1413,4 +1413,20 @@ def TT_DescriptorScatterOp : TT_Op<"descriptor_scatter", [TT_DescriptorStoreLike
 }
 
 
+// ----------------------------------------------------------------------------
+// Tutorial / demo op: a no-op sync that we lower to a PTX barrier.
+// ----------------------------------------------------------------------------
+def TT_DummySyncOp : TT_Op<"dummy_sync", [Pure]> {
+  let summary = "Demo sync op (tutorial)";
+  let description = [{
+    A trivial op used in the developer tutorial to demonstrate adding a new
+    Triton op and lowering it all the way to PTX. The LLVM lowering emits a
+    single `bar.sync 0;` PTX instruction via inline assembly.
+  }];
+
+  let arguments = (ins);
+  let results = (outs);
+  let assemblyFormat = "attr-dict";
+}
+
 #endif // Triton_OPS
