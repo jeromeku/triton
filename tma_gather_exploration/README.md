@@ -351,3 +351,152 @@ Artifacts will show up under `$TRITON_DUMP_DIR`. On sm90 hosts, do not launch ke
 
 ### Reference: AOT tips
 See Lei’s “Triton compiler development tips” for AOT/compile-only flows and artifact collection. The compile-only approach above mirrors the AOT style by using `triton.compile` and saving `k.asm[...]` to files.
+
+## From CUBIN To Runnable Python Function (NVIDIA)
+
+This section traces how a compiled kernel (cubin) is loaded and wrapped into a Python-callable launcher on NVIDIA.
+
+### High-level Flow
+- Compile pipeline produces `cubin` plus JSON metadata. (third_party/nvidia/backend/compiler.py)
+- Python wraps artifacts into `CompiledKernel` (python/triton/compiler/compiler.py) which lazily loads the binary and constructs a launcher when first invoked.
+- Driver: `driver.active` selects the NVIDIA driver (CudaDriver) using entry-points (python/triton/backends/__init__.py, python/triton/runtime/driver.py).
+- Binary load: C++ extension loads cubin via CUDA Driver API (cuModuleLoadData) and fetches the CUfunction (third_party/nvidia/backend/driver.c loadBinary).
+- Launcher generation: Python builds a backend-specific C shim (`__triton_launcher`) that
+  - Parses Python args
+  - Converts tensors/pointers/float scalars and CUDA stream to native types
+  - Calls cuLaunchKernelEx with launch attributes, scratch buffers, and kernel params (third_party/nvidia/backend/driver.py make_launcher).
+
+### Compiler emits cubin
+- File: third_party/nvidia/backend/compiler.py
+  - make_ptx → make_cubin, ptxas invocation:
+    - Lines 144–151, 158–190: constructs `ptxas` cmd with `--gpu-name=sm_XX`, optional `--opt-level 0`, captures ptxas log, reads cubin.
+
+```python
+# third_party/nvidia/backend/compiler.py:144-151,158-190 (excerpt)
+ptxas_cmd = [ptxas, *debug_info, *fmad, '-v', *disable_opt, *ptx_extra_options,
+             f'--gpu-name={arch}', fsrc.name, '-o', fbin]
+subprocess.run(ptxas_cmd, check=True, close_fds=False, stderr=flog)
+with open(fbin, 'rb') as f:
+    cubin = f.read()
+```
+
+### CompiledKernel: lazy module load + launcher construction
+- File: python/triton/compiler/compiler.py
+  - Class CompiledKernel (lines ~411+)
+  - _init_handles: line 444–468 loads binary and builds `_run` launcher; 492–101 covers call path in `__getitem__`.
+
+```python
+# python/triton/compiler/compiler.py:444-468, 492-101 (excerpt)
+def _init_handles(self):
+    device = driver.active.get_current_device()
+    self._run = driver.active.launcher_cls(self.src, self.metadata)
+    self.module, self.function, self.n_regs, self.n_spills, self.n_max_threads = (
+        driver.active.utils.load_binary(self.name, self.kernel, self.metadata.shared, device))
+
+def __getitem__(self, grid):
+    def runner(*args, stream=None):
+        if stream is None:
+            device = driver.active.get_current_device()
+            stream = driver.active.get_current_stream(device)
+        launch_metadata = self.launch_metadata(grid, stream, *args)
+        self.run(grid[0], grid[1], grid[2], stream, self.function, self.packed_metadata, launch_metadata,
+                 knobs.runtime.launch_enter_hook, knobs.runtime.launch_exit_hook, *args)
+    return runner
+```
+
+### Driver Selection and Active Backend
+- Files:
+  - python/triton/backends/__init__.py:37–43 — discovers backends via entry points `triton.backends` and imports `{backend}.driver`.
+  - python/triton/runtime/driver.py:6–13, 19–36 — picks exactly one active driver; `driver.active` gives the singleton.
+
+```python
+# python/triton/backends/__init__.py:37-43 (excerpt)
+for ep in entry_points().select(group="triton.backends"):
+    compiler = importlib.import_module(f"{ep.value}.compiler")
+    driver = importlib.import_module(f"{ep.value}.driver")
+    backends[ep.name] = Backend(...)
+```
+
+### NVIDIA Driver: utils and launcher class
+- File: third_party/nvidia/backend/driver.py
+  - CudaUtils: compiles a small C extension (cuda_utils) exposing load_binary, get_device_properties, cuOccupancy… (lines 62–77)
+  - make_launcher: generates a C source for `__triton_launcher` that defines `launch(...)` entry point; shapes how Python args are parsed and forwarded to `_launch` (lines 128–260+ and 260–339 contain the C string).
+  - wrap_handle_tensordesc: wraps launcher to convert Python tensor-descriptor args into a CUtensorMap or decomposed fields (lines 389–411).
+  - CudaLauncher: builds and holds the Python-callable `launch`, handles scratch allocations, invokes `launch(...)` (lines 414–434, 680–704).
+  - CudaDriver: registers the backend driver; provides current target, device, and benchmarker (lines 37–83).
+
+```python
+# third_party/nvidia/backend/driver.py:62-77 (excerpt)
+mod = compile_module_from_src(src=Path(dirname, "driver.c").read_text(), name="cuda_utils",
+                              library_dirs=library_dirs(), include_dirs=include_dirs, libraries=libraries)
+self.load_binary = mod.load_binary
+
+# third_party/nvidia/backend/driver.py:128-166,187-214 (signature/format building)
+_BASE_ARGS_FORMAT = "iiiKKppOOOOOO"
+def make_launcher(constants, signature, tensordesc_meta):
+    ... build CPython arg parse format and glue C ...
+
+# third_party/nvidia/backend/driver.py:318-337 (generated module init)
+PyMODINIT_FUNC PyInit___triton_launcher(void) { ... add function "launch" ... }
+
+# third_party/nvidia/backend/driver.py:414-434, 680-704
+class CudaLauncher:
+    def __init__(...):
+        src = make_launcher(...)
+        mod = compile_module_from_src(src=src, name="__triton_launcher", ...)
+        self.launch = wrap_handle_tensordesc(mod.launch, signature, tensordesc_meta)
+    def __call__(self, gridX, gridY, gridZ, stream, function, *args):
+        global_scratch = allocate_scratch(...)
+        profile_scratch = allocate_scratch(...)
+        self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+                    global_scratch, profile_scratch, *args)
+```
+
+### Loading CUBIN: CUDA Driver API in C extension
+- File: third_party/nvidia/backend/driver.c
+  - `loadBinary(name, cubin_bytes, shared, device)` (lines 101–164) loads the module/function using the CUDA Driver API.
+  - Returns (CUmodule, CUfunction, num_regs, local_spills, max_threads_per_block) to Python.
+  - Also defines `fill_tma_descriptor` (lines 51–157) to build CUtensorMap objects for TMA arguments.
+
+```c
+// third_party/nvidia/backend/driver.c:120-136,144-164 (excerpt)
+cuModuleLoadData(&mod, data);
+cuModuleGetFunction(&fun, mod, name);
+cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, fun);
+cuFuncGetAttribute(&n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, fun);
+cuFuncGetAttribute(&n_max_threads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, fun);
+return Py_BuildValue("(KKiii)", (uint64_t)mod, (uint64_t)fun, n_regs, n_spills/4, n_max_threads);
+```
+
+### The Generated Launcher: cuLaunchKernelEx
+- The C shim created by `make_launcher` includes `_launch(...)` which sets CUlaunchConfig and calls cuLaunchKernelEx with attributes (cluster dims, cooperative flag, programmatic stream serialization, dynamic shared memory).
+- File: third_party/nvidia/backend/driver.py (generated C string)
+  - `_launch(...)` body at lines 58–118 sets grid, block = `32 * num_warps`, attributes, and calls `cuLaunchKernelExHandle(&config, function, params, 0)`.
+
+```c
+// generated by make_launcher
+config.blockDimX = 32 * num_warps;
+config.sharedMemBytes = shared_memory;
+CUDA_CHECK(cuLaunchKernelExHandle(&config, function, params, 0));
+```
+
+### Putting It Together
+1) compile() produces artifacts; CompiledKernel stores asm dict and metadata.
+2) First call to kernel[...] triggers CompiledKernel._init_handles():
+   - driver.active.utils.load_binary → cuModuleLoadData + cuModuleGetFunction.
+   - driver.active.launcher_cls(...) creates Python-callable launch bound to the signature and metadata.
+3) kernel[grid](...) resolves stream, packs metadata/hooks, calls launcher.
+4) The launcher C shim packs args, sets up CUlaunchConfig, and calls cuLaunchKernelEx.
+
+Cross-reference (files/lines)
+- third_party/nvidia/backend/compiler.py:144–151, 158–190 — ptxas to cubin
+- python/triton/compiler/compiler.py:444–468, 492–101 — CompiledKernel `_init_handles`, `__getitem__`
+- python/triton/backends/__init__.py:37–43 — backend discovery
+- python/triton/runtime/driver.py:6–13, 19–36 — driver.active selection
+- third_party/nvidia/backend/driver.py:62–77 — CudaUtils (load_binary, etc.)
+- third_party/nvidia/backend/driver.py:124–260, 260–339 — make_launcher C-shim generation
+- third_party/nvidia/backend/driver.py:389–411 — wrap_handle_tensordesc
+- third_party/nvidia/backend/driver.py:414–434, 680–704 — CudaLauncher
+- third_party/nvidia/backend/driver.py:37–83 — CudaDriver
+- third_party/nvidia/backend/driver.c:101–164 — loadBinary (cuModuleLoadData/cuModuleGetFunction)
+- third_party/nvidia/backend/driver.c:51–157 — fillTMADescriptor (host-side CUtensorMap)
