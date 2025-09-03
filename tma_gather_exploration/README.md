@@ -314,3 +314,40 @@ python -m pytest -k test_tma_gather -q
 
 Proton helpers (third_party/proton/scripts):
 - dump_ttgir.sh: runs with TRITON_ALWAYS_COMPILE/TRITON_KERNEL_DUMP/TRITON_DUMP_DIR and collects TTGIR dumps.
+
+## Reproducing Concrete TTIR/TTGIR/LLIR/PTX Artifacts (Works on sm90 hosts)
+
+You have two options. Option A uses compile-only (AOT-style) so the host GPU does not need to support TMA gather; Option B uses JIT with an override arch and dump knobs.
+
+### Option A: Compile-only (recommended)
+- Script: `tma_gather_exploration/dump_artifacts.py`
+- What it does: builds `tma_gather_rows_kernel` and compiles for a chosen arch (default sm_100) using `triton.compile(ASTSource(...), target=GPUTarget("cuda", 100, 32))`. It writes `tma_gather_rows.{ttir,ttgir,llir,ptx}` and `cubin` under `tma_gather_exploration/out/`.
+
+Run:
+```bash
+python tma_gather_exploration/dump_artifacts.py \
+  --out-dir tma_gather_exploration/out \
+  --arch sm_100 --cc 100 --warp 32 \
+  --X 128 --Y 128 --block-x 32 --block-y 32 --y-offset 0 --dtype fp32
+```
+
+Notes:
+- The compile-only path does not execute the kernel, so it works on Hopper (sm_90) hosts.
+- Ensure `block-y * element_size >= 16` and `strides=[Y,1]` to satisfy descriptor constraints.
+- The script prints whether TTGIR contains `ttng.async_tma_gather` and whether PTX contains `tile::gather4`.
+
+### Option B: JIT with override arch and dumps
+If you prefer Triton’s normal JIT, you can run any Python script (including the unit test kernel) with:
+```bash
+export TRITON_OVERRIDE_ARCH=sm_100
+export TRITON_ALWAYS_COMPILE=1 TRITON_KERNEL_DUMP=1 TRITON_DUMP_DIR=$PWD/dump
+export NVPTX_ENABLE_DUMP=1 TRITON_DUMP_PTXAS_LOG=1 LLVM_IR_ENABLE_DUMP=1
+python - <<'PY'
+import triton, triton.language as tl
+# Define/compile the same kernel here or import it
+PY
+```
+Artifacts will show up under `$TRITON_DUMP_DIR`. On sm90 hosts, do not launch kernels that actually execute TMA gather; compile-only is safer.
+
+### Reference: AOT tips
+See Lei’s “Triton compiler development tips” for AOT/compile-only flows and artifact collection. The compile-only approach above mirrors the AOT style by using `triton.compile` and saving `k.asm[...]` to files.
