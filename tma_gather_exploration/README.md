@@ -352,6 +352,34 @@ Artifacts will show up under `$TRITON_DUMP_DIR`. On sm90 hosts, do not launch ke
 ### Reference: AOT tips
 See Lei’s “Triton compiler development tips” for AOT/compile-only flows and artifact collection. The compile-only approach above mirrors the AOT style by using `triton.compile` and saving `k.asm[...]` to files.
 
+## Inspecting the Launcher Config Without Running CUDA
+
+Script: `tma_gather_exploration/inspect_launcher.py`
+- Compiles tma_gather_rows_kernel (compile-only) to gather metadata, then computes the CUlaunchConfig the NVIDIA launcher would build (grid, block, sharedMem, attributes) — without calling cuLaunchKernelEx.
+- Works on sm90 hosts (no TMA execution) because it does not launch the kernel.
+
+Example:
+```bash
+python tma_gather_exploration/inspect_launcher.py \
+  --arch sm_100 --cc 100 --warp 32 \
+  --X 128 --Y 128 --block-x 32 --block-y 32 --y-offset 0 \
+  --grid 2 1 1 --out tma_gather_exploration/out/launch_inspect.txt
+```
+Output (launch_inspect.txt):
+```
+# Kernel metadata
+name=@tma_gather_rows_kernel
+num_warps=4 num_ctas=1 cluster_dims=(1, 1, 1)
+shared=4096B global_scratch=0B align=1
+profile_scratch=0B align=1
+launch_cooperative_grid=False launch_pdl=False
+
+# Computed CUlaunchConfig (no launch performed)
+grid=(2, 1, 1) block=(128, 1, 1) sharedMemBytes=4096
+attrs=[]
+```
+
+
 ## From CUBIN To Runnable Python Function (NVIDIA)
 
 This section traces how a compiled kernel (cubin) is loaded and wrapped into a Python-callable launcher on NVIDIA.
