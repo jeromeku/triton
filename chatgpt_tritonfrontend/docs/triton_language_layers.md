@@ -1,4 +1,5 @@
 # Triton’s Python-level languages — core vs standard vs semantic
+https://chatgpt.com/share/68c0325b-6810-8011-a0f4-15e25059861b
 
 This document is a practical map of the three layers that live under `triton.language` and how they feed the JIT pipeline (`@triton.jit`) down to MLIR and device code.
 
