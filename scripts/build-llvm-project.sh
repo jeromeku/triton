@@ -18,13 +18,14 @@ if [ -z "$CMAKE_ARGS" ]; then
               -DCMAKE_BUILD_TYPE="$LLVM_BUILD_TYPE"
               -DLLVM_CCACHE_BUILD=OFF
               -DLLVM_ENABLE_ASSERTIONS=ON
-              -DCMAKE_C_COMPILER=clang
-              -DCMAKE_CXX_COMPILER=clang++
+              -DCMAKE_C_COMPILER=clang-22
+              -DCMAKE_CXX_COMPILER=clang++-22
               -DLLVM_ENABLE_LLD=ON
               -DLLVM_OPTIMIZED_TABLEGEN=ON
-              -DMLIR_ENABLE_BINDINGS_PYTHON=OFF
+              -DMLIR_ENABLE_BINDINGS_PYTHON=ON
               -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGETS"
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+              -DCMAKE_VERBOSE_MAKEFILE=1
               -DLLVM_ENABLE_PROJECTS="$LLVM_PROJECTS"
               -DCMAKE_INSTALL_PREFIX="$LLVM_INSTALL_PATH"
               -B"$LLVM_BUILD_PATH" "$LLVM_PROJECT_PATH/llvm"

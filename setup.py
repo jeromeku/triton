@@ -433,6 +433,7 @@ class CMakeBuild(build_ext):
         cmake_args = get_thirdparty_packages([get_json_package_info()])
         cmake_args += self.get_pybind11_cmake_args()
         cupti_include_dir = get_env_with_keys(["TRITON_CUPTI_INCLUDE_PATH"])
+        
         if cupti_include_dir == "":
             cupti_include_dir = os.path.join(get_base_dir(), "third_party", "nvidia", "backend", "include")
         cmake_args += ["-DCUPTI_INCLUDE_DIR=" + cupti_include_dir]
@@ -460,7 +461,7 @@ class CMakeBuild(build_ext):
             "-G", "Ninja",  # Ninja is much faster than make
             "-DCMAKE_MAKE_PROGRAM=" +
             ninja_dir,  # Pass explicit path to ninja otherwise cmake may cache a temporary path
-            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", "-DLLVM_ENABLE_WERROR=ON",
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", "-DLLVM_ENABLE_WERROR=ON", "-DCMAKE_VERBOSE_MAKEFILE=1",
             "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + extdir, "-DTRITON_BUILD_PYTHON_MODULE=ON",
             "-DPython3_EXECUTABLE:FILEPATH=" + sys.executable, "-DPython3_INCLUDE_DIR=" + python_include_dir,
             "-DTRITON_CODEGEN_BACKENDS=" + ';'.join([b.name for b in backends if not b.is_external]),
@@ -484,8 +485,8 @@ class CMakeBuild(build_ext):
 
         if check_env_flag("TRITON_BUILD_WITH_CLANG_LLD"):
             cmake_args += [
-                "-DCMAKE_C_COMPILER=clang",
-                "-DCMAKE_CXX_COMPILER=clang++",
+                "-DCMAKE_C_COMPILER=clang-22",
+                "-DCMAKE_CXX_COMPILER=clang++-22",
                 "-DCMAKE_LINKER=lld",
                 "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
                 "-DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",

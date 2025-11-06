@@ -3,7 +3,14 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-LLVM_PROJECT_PATH=${LLVM_PROJECT_PATH:-"$REPO_ROOT/llvm-project"}
+
+LLVM_PROJECT_PATH=${LLVM_PROJECT_PATH:-"${REPO_ROOT}/llvm-project"}
+
+if [[ ! -d "${LLVM_PROJECT_PATH}" ]]; then
+    echo "LLVM_PROJECT_PATH not found ${LLVM_PROJECT_PATH}"
+    exit 1
+fi
+
 LLVM_BUILD_PATH=${LLVM_BUILD_PATH:-"$LLVM_PROJECT_PATH/build"}
 
 export LLVM_BUILD_DIR=${LLVM_BUILD_PATH}
@@ -18,11 +25,17 @@ export TRITON_BUILD_WITH_CLANG_LLD=true
 export TRITON_BUILD_WITH_CCACHE=true
 export TRITON_REL_BUILD_WITH_ASSERTS=1
 export TRITON_NO_WERROR=1
+# export TRITON_BUILD_PROTON=1,
+# export TRITON_CUPTI_INCLUDE_PATH=/usr/local/cuda/include
+export REL_WITH_DEB_INFO=1
+
+
 # Build Triton (editable install)
 cd ${REPO_ROOT}
 
 # make dev-install-requires
 # uv pip install torch --index-url https://download.pytorch.org/whl/nightly/cu128
+
 # uv pip uninstall triton pytorch-triton
 rm -rf build
 pip install -v -e . --no-build-isolation 2>&1 | tee _triton_install.txt
