@@ -5,7 +5,6 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 LLVM_TARGETS=${LLVM_TARGETS:-Native;NVPTX;AMDGPU}
 LLVM_PROJECTS=${LLVM_PROJECTS:-mlir;llvm;lld}
 LLVM_BUILD_TYPE=${LLVM_BUILD_TYPE:-RelWithDebInfo}
-LLVM_BUILD_SHARED_LIBS=${LLVM_BUILD_SHARED_LIBS:-OFF}
 LLVM_COMMIT_HASH=${LLVM_COMMIT_HASH:-$(cat "$REPO_ROOT/cmake/llvm-hash.txt")}
 LLVM_PROJECT_PATH=${LLVM_PROJECT_PATH:-"$REPO_ROOT/llvm-project"}
 LLVM_BUILD_PATH=${LLVM_BUILD_PATH:-"$LLVM_PROJECT_PATH/build"}
@@ -19,15 +18,14 @@ if [ -z "$CMAKE_ARGS" ]; then
               -DCMAKE_BUILD_TYPE="$LLVM_BUILD_TYPE"
               -DLLVM_CCACHE_BUILD=OFF
               -DLLVM_ENABLE_ASSERTIONS=ON
-              -DCMAKE_C_COMPILER=clang
-              -DCMAKE_CXX_COMPILER=clang++
+              -DCMAKE_C_COMPILER=clang-22
+              -DCMAKE_CXX_COMPILER=clang++-22
               -DLLVM_ENABLE_LLD=ON
-              -DBUILD_SHARED_LIBS="$LLVM_BUILD_SHARED_LIBS"
               -DLLVM_OPTIMIZED_TABLEGEN=ON
-              -DMLIR_ENABLE_BINDINGS_PYTHON=OFF
-              -DLLVM_ENABLE_ZSTD=OFF
+              -DMLIR_ENABLE_BINDINGS_PYTHON=ON
               -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGETS"
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+              -DCMAKE_VERBOSE_MAKEFILE=1
               -DLLVM_ENABLE_PROJECTS="$LLVM_PROJECTS"
               -DCMAKE_INSTALL_PREFIX="$LLVM_INSTALL_PATH"
               -B"$LLVM_BUILD_PATH" "$LLVM_PROJECT_PATH/llvm"
@@ -50,5 +48,5 @@ git -C "$LLVM_PROJECT_PATH" fetch origin "$LLVM_COMMIT_HASH"
 git -C "$LLVM_PROJECT_PATH" reset --hard "$LLVM_COMMIT_HASH"
 echo "Configuring with ${CMAKE_ARGS[@]}"
 cmake "${CMAKE_ARGS[@]}"
-# echo "Building LLVM"
-# ninja -C "$LLVM_BUILD_PATH"
+echo "Building LLVM"
+ninja -C "$LLVM_BUILD_PATH"

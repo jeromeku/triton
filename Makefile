@@ -115,7 +115,8 @@ dev-install-llvm:
 		LLVM_INCLUDE_DIRS=$(LLVM_BUILD_PATH)/include \
 		LLVM_LIBRARY_DIR=$(LLVM_BUILD_PATH)/lib \
 		LLVM_SYSPATH=$(LLVM_BUILD_PATH) \
-	$(MAKE) dev-install
+
+# 	$(MAKE) dev-install
 
 # Updating lit tests
 
