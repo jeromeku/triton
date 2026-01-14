@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
+add_compile_options(-Wno-error=deprecated-declarations)
 
 if(POLICY CMP0116)
 # Introduced in cmake 3.20
@@ -54,6 +55,8 @@ endif()
 if(NOT MSVC)
   set(CMAKE_C_FLAGS_TRITONRELBUILDWITHASSERTS "-O2 -g")
   set(CMAKE_CXX_FLAGS_TRITONRELBUILDWITHASSERTS "-O2 -g")
+  set(CMAKE_C_FLAGS_TRITONDEBUG "-Og -g")
+  set(CMAKE_CXX_FLAGS_TRITONDEBUG "-Og -g")
   set(CMAKE_C_FLAGS_TRITONBUILDWITHO1 "-O1")
   set(CMAKE_CXX_FLAGS_TRITONBUILDWITHO1 "-O1")
 else()

@@ -137,6 +137,8 @@ def get_build_type():
         return "TritonRelBuildWithAsserts"
     elif check_env_flag("TRITON_BUILD_WITH_O1"):
         return "TritonBuildWithO1"
+    elif check_env_flag("TRITON_DEBUG"):
+        return "TritonDebug"
     else:
         # TODO: change to release when stable enough
         return "TritonRelBuildWithAsserts"
@@ -473,6 +475,7 @@ class CMakeBuild(build_ext):
 
         # configuration
         cfg = get_build_type()
+        print(f"BUILD TYPE: {cfg}")
         build_args = ["--config", cfg]
 
         cmake_args += [f"-DCMAKE_BUILD_TYPE={cfg}"]
