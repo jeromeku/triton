@@ -12,6 +12,7 @@ sudo apt install libstdc++-12-dev
 
 sudo ln -s /usr/bin/clang-22 /usr/bin/clang
 sudo ln -s /usr/bin/clang++-22 /usr/bin/clang++ 
+
 # # Or install the full build-essential package which includes everything
 # sudo apt install build-essential
 
