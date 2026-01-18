@@ -111,10 +111,14 @@ class FileCacheManager(CacheManager):
         rnd_id = str(uuid.uuid4())
         # we use the PID in case a bunch of these around so we can see what PID made it
         pid = os.getpid()
-        # use temp dir to be robust against program interruptions
-        temp_dir = os.path.join(self.cache_dir, f"tmp.pid_{pid}_{rnd_id}")
-        os.makedirs(temp_dir, exist_ok=True)
-        temp_path = os.path.join(temp_dir, filename)
+        # Write to a temp file in the *same directory* and atomically replace.
+        #
+        # Note: On some network filesystems (e.g. certain NFS setups), atomic
+        # rename/replace across directories can fail with EXDEV ("Invalid cross-device
+        # link") even when both directories are under the same mount. Writing the
+        # temp file in the same directory avoids this class of failures while still
+        # keeping the final replace atomic.
+        temp_path = self._make_path(f"tmp.pid_{pid}_{rnd_id}.{filename}")
 
         mode = "wb" if binary else "w"
         with open(temp_path, mode) as f:
@@ -122,7 +126,6 @@ class FileCacheManager(CacheManager):
         # Replace is guaranteed to be atomic on POSIX systems if it succeeds
         # so filepath cannot see a partial write
         os.replace(temp_path, filepath)
-        os.removedirs(temp_dir)
         return filepath
 
 

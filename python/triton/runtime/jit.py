@@ -671,7 +671,17 @@ class JITFunction(JITCallable, KernelInterface[T]):
         Precompute as much as possible.
         """
         from ..compiler import CompiledKernel, compile, ASTSource, make_backend
-        target = driver.active.get_current_target()
+        from triton.backends.compiler import GPUTarget
+
+        target: GPUTarget = driver.active.get_current_target()
+        
+        if knobs.runtime.override_arch is not None:
+            arch = knobs.runtime.override_arch
+            if arch == "sm90":
+                target = GPUTarget(backend=target.backend, arch=90, warp_size=target.warp_size)
+            elif arch == "sm100":
+                target = GPUTarget(backend=target.backend, arch=100, warp_size=target.warp_size)
+
         backend = make_backend(target)
         self.CompiledKernel = CompiledKernel
         self.compile = compile
@@ -850,6 +860,7 @@ class JITFunction(JITCallable, KernelInterface[T]):
         )
 
     def _do_compile(self, key, signature, device, constexprs, options, attrs, warmup):
+        breakpoint()
         kernel_cache, _, target, backend, _ = self.device_caches[device]
 
         if self._call_hook(knobs.runtime.jit_cache_hook, key, signature, device, constexprs, options, [attrs], warmup):

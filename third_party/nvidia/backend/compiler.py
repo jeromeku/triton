@@ -170,6 +170,10 @@ class CUDABackend(BaseBackend):
         return f"cuda:{capability}"
 
     def __init__(self, target: GPUTarget) -> None:
+        import inspect
+        stack = inspect.stack()
+        trace = [f"{s.function} :: {s.filename}#{s.lineno}" for s in stack]
+        breakpoint()
         super().__init__(target)
         self.binary_ext = "cubin"
 
@@ -342,6 +346,7 @@ class CUDABackend(BaseBackend):
         return mod
 
     def make_llir(self, src, metadata, options, capability):
+        breakpoint()
         ptx_version = get_ptx_version_from_options(options, self.target.arch)
 
         mod = src

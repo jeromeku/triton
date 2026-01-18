@@ -288,6 +288,7 @@ def compile(src, target=None, options=None, _env_vars=None):
     metadata["triton_version"] = __version__
     # run compilation pipeline  and populate metadata
     stages = dict()
+    breakpoint()
     backend.add_stages(stages, options, src.language)
     first_stage = list(stages.keys()).index(src.ext)
     # when the source is an IR file, don't apply the passes related to this stage. This makes it easier to write IR level tests.
@@ -324,6 +325,7 @@ def compile(src, target=None, options=None, _env_vars=None):
     if compilation_listener:
         timer.finished_ir_initialization()
     for ext, compile_ir in list(stages.items())[first_stage:]:
+        breakpoint()
         next_module = compile_ir(module, metadata)
         ir_filename = f"{file_name}.{ext}"
         if fn_override_manager is None:
